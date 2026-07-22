@@ -2,6 +2,7 @@
 
 **Catch users getting stuck, then help them on the spot.**
 
+[![ci](https://github.com/csnyder256/ux-struggle-detector/actions/workflows/ci.yml/badge.svg)](https://github.com/csnyder256/ux-struggle-detector/actions/workflows/ci.yml)
 ![TypeScript](https://img.shields.io/badge/typescript-5.6%20strict-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![Next.js](https://img.shields.io/badge/next.js-15%20app%20router-000000?style=flat-square&logo=nextdotjs&logoColor=white)
 ![Prisma](https://img.shields.io/badge/prisma-5%20%2F%20postgres-2D3748?style=flat-square&logo=prisma&logoColor=white)
