@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ux-struggle-detector (Clarus Heal)</title>
+<meta name="description" content="Maps a web app's UI from its repo or by crawling it, watches real users with a drop-in browser SDK, detects 40 struggle patterns server-side, and pushes live in-app interventions without touching the customer's code.">
+<style>
+  :root {
+    --bg: #fbfaf7;
+    --bg-panel: #ffffff;
+    --ink: #16150f;
+    --ink-soft: #55524a;
+    --ink-faint: #85817a;
+    --rule: #e2ded4;
+    --accent: #b4400d;
+    --accent-soft: #fdf0e6;
+    --code-bg: #17160f;
+    --code-ink: #eae5d8;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #100f0c;
+      --bg-panel: #191813;
+      --ink: #f2efe6;
+      --ink-soft: #b0aca1;
+      --ink-faint: #817d73;
+      --rule: #2c2a23;
+      --accent: #f0873f;
+      --accent-soft: #241a12;
+      --code-bg: #080806;
+      --code-ink: #e6e1d4;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.65;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .wrap {
+    max-width: 62rem;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+  }
+  @media (max-width: 30rem) { .wrap { padding: 0 1.15rem; } }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 1.1rem;
+  }
+
+  /* hero */
+  header { padding: 5.5rem 0 3.5rem; }
+  @media (max-width: 40rem) { header { padding: 3.25rem 0 2.5rem; } }
+  h1 {
+    font-size: clamp(2.3rem, 7.5vw, 4.1rem);
+    line-height: 1.02;
+    letter-spacing: -0.035em;
+    font-weight: 640;
+    margin: 0 0 1rem;
+  }
+  .tagline {
+    font-size: clamp(1.1rem, 2.6vw, 1.45rem);
+    line-height: 1.4;
+    color: var(--ink);
+    font-weight: 460;
+    max-width: 34ch;
+    margin: 0 0 1.6rem;
+  }
+  .lede {
+    color: var(--ink-soft);
+    max-width: 66ch;
+    margin: 0 0 2.2rem;
+  }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 0.7rem; align-items: center; }
+  .btn {
+    display: inline-block;
+    padding: 0.68rem 1.25rem;
+    border-radius: 2px;
+    font-size: 0.95rem;
+    font-weight: 560;
+    letter-spacing: 0.01em;
+    border: 1px solid var(--accent);
+  }
+  .btn-primary { background: var(--accent); color: var(--bg); }
+  .btn-primary:hover { text-decoration: none; opacity: 0.88; }
+  .btn-ghost { color: var(--accent); border-color: var(--rule); }
+  .btn-ghost:hover { text-decoration: none; border-color: var(--accent); }
+
+  /* stat strip */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    margin: 3.5rem 0 0;
+  }
+  .stat { background: var(--bg); padding: 1.2rem 1rem; }
+  .stat b {
+    display: block;
+    font-family: var(--mono);
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+  .stat span {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--ink-faint);
+    margin-top: 0.3rem;
+    letter-spacing: 0.01em;
+  }
+
+  /* sections */
+  section { padding: 4rem 0 0; }
+  h2 {
+    font-size: clamp(1.35rem, 3.2vw, 1.75rem);
+    letter-spacing: -0.02em;
+    font-weight: 620;
+    margin: 0 0 1.4rem;
+    padding-bottom: 0.7rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  h3 {
+    font-size: 1.02rem;
+    font-weight: 620;
+    letter-spacing: -0.005em;
+    margin: 0 0 0.5rem;
+  }
+  p { margin: 0 0 1rem; color: var(--ink-soft); max-width: 72ch; }
+  p strong { color: var(--ink); font-weight: 600; }
+
+  .pillars {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 1.25rem;
+  }
+  .pillar {
+    background: var(--bg-panel);
+    border: 1px solid var(--rule);
+    border-top: 2px solid var(--accent);
+    padding: 1.4rem 1.3rem 1.2rem;
+  }
+  .pillar .num {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--accent);
+    letter-spacing: 0.12em;
+    display: block;
+    margin-bottom: 0.6rem;
+  }
+  .pillar p { font-size: 0.92rem; margin: 0; }
+
+  ul.plain { list-style: none; padding: 0; margin: 0; }
+  ul.plain li {
+    padding: 0.85rem 0;
+    border-bottom: 1px solid var(--rule);
+    color: var(--ink-soft);
+    font-size: 0.95rem;
+    max-width: 74ch;
+  }
+  ul.plain li:first-child { border-top: 1px solid var(--rule); }
+  ul.plain li b { color: var(--ink); font-weight: 600; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.87em;
+    background: var(--accent-soft);
+    color: var(--accent);
+    padding: 0.08em 0.32em;
+    border-radius: 2px;
+  }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-ink);
+    padding: 1.15rem 1.25rem;
+    border-radius: 3px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    line-height: 1.7;
+    margin: 0 0 1rem;
+    max-width: 100%;
+  }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  pre .c { color: #8d887a; }
+
+  .flow {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    line-height: 1.85;
+    background: var(--bg-panel);
+    border: 1px solid var(--rule);
+    padding: 1.15rem 1.25rem;
+    overflow-x: auto;
+    white-space: pre;
+    color: var(--ink-soft);
+    margin: 0 0 1.2rem;
+  }
+
+  .table-scroll { overflow-x: auto; margin: 0 0 1rem; }
+  table { border-collapse: collapse; width: 100%; min-width: 26rem; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 0.6rem 0.9rem 0.6rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; }
+  td { color: var(--ink-soft); }
+  td:first-child { color: var(--ink); font-family: var(--mono); font-size: 0.83rem; white-space: nowrap; padding-right: 1.4rem; }
+  .tag { font-size: 0.72rem; font-family: var(--mono); letter-spacing: 0.05em; color: var(--accent); }
+
+  .note {
+    border-left: 2px solid var(--accent);
+    padding: 0.15rem 0 0.15rem 1.1rem;
+    margin: 1.6rem 0 0;
+  }
+  .note p { margin: 0; font-size: 0.93rem; }
+
+  footer {
+    margin-top: 5rem;
+    border-top: 1px solid var(--rule);
+    padding: 2.2rem 0 3.5rem;
+    color: var(--ink-faint);
+    font-size: 0.87rem;
+  }
+  footer a { color: var(--ink-soft); }
+  footer .links { display: flex; flex-wrap: wrap; gap: 1.2rem; margin-bottom: 0.9rem; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">Clarus Heal / ux-struggle-detector</p>
+    <h1>Catch users getting stuck, then help them on the spot.</h1>
+    <p class="tagline">Detect confusion server-side and answer with a hint in the same HTTP response.</p>
+    <p class="lede">
+      It maps a customer's web app UI, either by reading their GitHub repo or by crawling their live site,
+      then watches real users through a drop-in script tag. Struggle detection runs server-side against
+      40 named rules, and any intervention it decides to show comes back in the same response the events
+      arrived in. The customer never edits their application code to add a hint. A PII scrubber runs in the
+      browser before anything is sent.
+    </p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://github.com/csnyder256/ux-struggle-detector">View on GitHub</a>
+      <a class="btn btn-ghost" href="#quickstart">Quickstart</a>
+    </div>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><b>40</b><span>detection rules</span></div>
+    <div class="stat"><b>46</b><span>framework entries</span></div>
+    <div class="stat"><b>25 KB</b><span>minified SDK</span></div>
+    <div class="stat"><b>165</b><span>tests, 10 files</span></div>
+    <div class="stat"><b>20.5k</b><span>lines of TS/TSX</span></div>
+  </div>
+
+  <section>
+    <h2>Three pillars</h2>
+    <div class="pillars">
+      <div class="pillar">
+        <span class="num">01</span>
+        <h3>Map the UI first</h3>
+        <p>Framework detection across 46 registry entries in 22 families, a Babel AST parser for React and Preact, a universal template scanner for everything else, then an LLM pass that gives each element a semantic name and intent.</p>
+      </div>
+      <div class="pillar">
+        <span class="num">02</span>
+        <h3>Watch from the browser</h3>
+        <p>A dependency-free SDK, about 1,640 lines, capturing 15 event types with client-side PII masking, offline buffering, and uniform, per-type, or predicate-based sampling.</p>
+      </div>
+      <div class="pillar">
+        <span class="num">03</span>
+        <h3>Decide and intervene</h3>
+        <p>40 pure detection rules over hydrated session history, then a bandit-driven dispatcher that returns an overlay, tooltip, or hint inline, gated by safe mode and a route denylist.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Why the code looks like this</h2>
+    <p>
+      Analytics and replay tools observe and report. Tour tools intervene, but only where a human already
+      decided in advance that a tour should appear. The gap is between knowing something is wrong and doing
+      something about it while the user is still on the page. Three constraints shaped everything else.
+    </p>
+    <ul class="plain">
+      <li><b>The system has to know what the UI is, before anyone uses it.</b> "The user rage-clicked element <code>sh_9f3c...</code>" is useless. "The user rage-clicked the Save Tax Settings button on <code>/settings/billing</code>" is actionable. So the frontend is ingested and mapped first.</li>
+      <li><b>Struggle spans HTTP requests.</b> Rage clicks fit in one event batch. Circular navigation, back-button thrash, and dead ends do not. A detector that only sees the incoming batch will never fire those rules and will still look like it works. The ingest route hydrates up to 1,000 stored events from a 5-minute lookback before running detection.</li>
+      <li><b>Getting it wrong is worse than doing nothing.</b> Safe mode is on by default and time-boxed via <code>safeModeUntil</code>, invasive intervention types are allowlist-gated, sensitive routes have a denylist, and detection thresholds adapt per element from nightly p95 baselines instead of using one global constant.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Data flow</h2>
+    <div class="flow">customer repo or live URL
+   |
+   v
+framework detector (46 entries, 22 families)
+   |
+   v
+Babel AST parser  |  universal template scan
+   |
+   v
+UIElement / UIRoute rows  ->  LLM enrichment (name, intent, copy)
+                                     |
+real user's browser                  |
+   |  SDK: 15 event types, PII scrub, |
+   |  offline buffer, sampling        |
+   v                                  v
+POST /api/events -> persist (idempotent)
+                 -> hydrate session history
+                 -> load per-element baselines
+                 -> 40-rule detector
+                 -> dispatcher (bandit, cache, denylist, safe mode)
+                 -> interventions in the SAME response
+                            |
+                 SDK renders overlay / tooltip / hint
+                            |
+                 outcome events feed the bandit's next pick</div>
+    <p>
+      Every extracted element gets a deterministic ID (<code>sh_</code> plus 32 hex chars) hashed over
+      <code>(orgId, filePath, nodeDescriptor)</code> with the global Web Crypto API, so the identical function
+      runs unmodified in Node build tooling, in edge runtimes, and in the customer's browser. Drift between
+      those three consumers would degrade the system silently rather than failing loudly, which is why the
+      invariant is documented in the source.
+    </p>
+  </section>
+
+  <section>
+    <h2>Key modules</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Path</th><th>Lines</th><th>What it is</th></tr></thead>
+        <tbody>
+          <tr><td>src/lib/struggle/detect.ts</td><td>1,182</td><td>the 40 detection rules, each a pure function</td></tr>
+          <tr><td>src/lib/parsers/react.ts</td><td>797</td><td>Babel JSX extraction</td></tr>
+          <tr><td>src/app/api/events/route.ts</td><td>714</td><td>ingest, hydrate, detect, dispatch</td></tr>
+          <tr><td>src/lib/parsers/universal-html.ts</td><td>703</td><td>template scan for non-React families</td></tr>
+          <tr><td>prisma/schema.prisma</td><td>666</td><td>23 models, 10 enums, 4 applied migrations</td></tr>
+          <tr><td>src/sdk/index.ts</td><td>651</td><td>capture loop and init</td></tr>
+          <tr><td>src/sdk/renderers.ts</td><td>640</td><td>12 intervention renderers</td></tr>
+          <tr><td>src/lib/parsers/registry.ts</td><td>609</td><td>46 framework entries, 22 families</td></tr>
+          <tr><td>src/lib/interventions/dispatcher.ts</td><td>523</td><td>variant selection and gating</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Details worth a look</h2>
+    <ul class="plain">
+      <li><b>Idempotent ingest by construction.</b> A <code>(orgId, idempotencyKey)</code> unique index plus <code>createMany({ skipDuplicates: true })</code> means the offline replay buffer can retry as aggressively as it likes with zero server-side dedup logic.</li>
+      <li><b>Epsilon-greedy bandit over copy variants.</b> Epsilon 0.1, weighted by empirical success rate with Laplace smoothing. Deterministic selection takes over below 30 total impressions and whenever the stats map is absent, so early exploration is guaranteed and unit tests stay reproducible. The RNG is injectable.</li>
+      <li><b>Client-side PII scrubbing.</b> 15 regex patterns mask emails, card-shaped digit runs, SSNs, phone numbers, IBANs, IP addresses, JWTs, and AWS, GitHub, Stripe and LLM-vendor key shapes, plus customer-supplied patterns. A scrubber that runs on the server has already lost.</li>
+      <li><b>Keys handled properly.</b> Ingest keys are stored as SHA-256 hashes plus an 8-character display prefix; the plaintext is shown once. Customer LLM keys are encrypted at rest with AES-256-GCM, a fresh 12-byte IV per record, and tamper detection under test.</li>
+      <li><b>Versioned wire schema.</b> <code>EVENT_SCHEMA_VERSION</code> is 3 and versions 1 and 2 are still accepted, so old cached SDK bundles in customers' browsers keep working through a rollout.</li>
+    </ul>
+  </section>
+
+  <section id="quickstart">
+    <h2>Quickstart</h2>
+    <p>Node 20 or newer (CI runs 22) and Postgres. The setup script installs pnpm, installs dependencies, writes <code>.env</code> with generated secrets, and builds the SDK bundle.</p>
+<pre><code>./scripts/setup.sh            <span class="c"># macOS / Linux</span>
+.\scripts\setup.ps1           <span class="c"># Windows</span>
+
+docker compose up -d          <span class="c"># Postgres + Adminer, skip if you have your own</span>
+
+<span class="c"># the one value you set by hand in .env:</span>
+<span class="c">#   DATABASE_URL="postgresql://postgres:postgres@localhost:5432/clarus_heal?schema=public"</span>
+
+pnpm db:migrate
+pnpm dev</code></pre>
+    <p>Installing the SDK on a customer's page is one script tag, or two if you prefer explicit options:</p>
+<pre><code>&lt;script src="/sdk.min.js" data-org-id="org_..." data-ingest-key="ck_..."&gt;&lt;/script&gt;</code></pre>
+    <p>
+      Open-access mode is the default (<code>REQUIRE_AUTH="false"</code>, <code>REQUIRE_INGEST_KEY="false"</code>):
+      no sign-in, everything runs against an auto-provisioned demo org, and the Settings page can seed synthetic
+      data. <code>public/demo/index.html</code> is a standalone harness that runs in console mode with no server
+      and no database, which is the fastest way to watch detection fire.
+    </p>
+    <p>
+      Longer walkthroughs live in the repo:
+      <a href="https://github.com/csnyder256/ux-struggle-detector/blob/main/GETTING_STARTED.md">GETTING_STARTED.md</a>
+      for a step-by-step setup, and
+      <a href="https://github.com/csnyder256/ux-struggle-detector/blob/main/GITHUB_SETUP.md">GITHUB_SETUP.md</a>
+      for registering the GitHub App, which is only needed for the repo-ingest path.
+    </p>
+  </section>
+
+  <section>
+    <h2>What is built, what is not</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Area</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>Repo ingest, URL crawl, SPA crawl</td><td class="tag">built</td><td>Octokit tree and blob API, no git clone</td></tr>
+          <tr><td>Framework detection</td><td class="tag">built</td><td>46 entries, 22 families, confidence-scored</td></tr>
+          <tr><td>React / Preact AST parsing</td><td class="tag">built</td><td>Babel</td></tr>
+          <tr><td>Other framework parsing</td><td class="tag">partial</td><td>regex template scanner, less accurate than AST</td></tr>
+          <tr><td>StubParser / SoftStubParser</td><td class="tag">unreachable</td><td>present as an escape hatch, but nothing imports them</td></tr>
+          <tr><td>SDK capture</td><td class="tag">built</td><td>15 event types, scrub, buffer, sampling</td></tr>
+          <tr><td>SDK renderers</td><td class="tag">partial</td><td>12 of 15 types; TOUR renders as a modal</td></tr>
+          <tr><td>DOM / BEHAVIOR / AUTO_FIX</td><td class="tag">not built</td><td>gated in the dispatcher; nothing rewrites a customer's DOM</td></tr>
+          <tr><td>40 detection rules + baselines</td><td class="tag">built</td><td>per-element adaptive thresholds</td></tr>
+          <tr><td>Dispatch, denylist, safe mode</td><td class="tag">built</td><td>bandit with deterministic fallback</td></tr>
+          <tr><td>SaaS shell</td><td class="tag">built</td><td>magic-link auth, onboarding, 11 dashboard pages, metering</td></tr>
+          <tr><td>Event type persistence</td><td class="tag">partial</td><td>SDK emits 15 types, the DB enum stores 7</td></tr>
+          <tr><td>Integration / E2E tests</td><td class="tag">not built</td><td>unit tests only, no Postgres container in CI</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <p><strong>This has never been deployed publicly. No customers, no traffic, no revenue.</strong> Every number on this page comes from the code and the test suite.</p>
+    </div>
+  </section>
+
+  <footer>
+    <div class="links">
+      <a href="https://github.com/csnyder256/ux-struggle-detector">Repository</a>
+      <a href="https://github.com/csnyder256/ux-struggle-detector/blob/main/README.md">README</a>
+      <a href="https://github.com/csnyder256/ux-struggle-detector/blob/main/GETTING_STARTED.md">Getting started</a>
+      <a href="https://github.com/csnyder256/ux-struggle-detector/blob/main/GITHUB_SETUP.md">GitHub App setup</a>
+    </div>
+    <div>MIT licensed. Built by Cade (<a href="https://github.com/csnyder256">github.com/csnyder256</a>).</div>
+  </footer>
+
+</div>
+</body>
+</html>

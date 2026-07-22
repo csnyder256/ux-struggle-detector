@@ -1,0 +1,666 @@
+// Clarus Heal - database schema.
+// All customer data tables carry orgId. Auth.js (v5) tables follow the standard
+// Prisma adapter shape. UIElement primary key is the deterministic sh_<hash> id.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Auth.js v5 (Prisma adapter) + multi-tenancy
+// ────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+
+  accounts    Account[]
+  sessions    Session[]
+  memberships Membership[]
+  ownedOrgs   Org[]        @relation("OrgOwner")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Org {
+  id          String   @id @default(cuid())
+  name        String
+  ownerUserId String
+  createdAt   DateTime @default(now())
+
+  owner         User                    @relation("OrgOwner", fields: [ownerUserId], references: [id])
+  memberships   Membership[]
+  config        PlatformConfig?
+  keys          ProviderKey[]
+  elements      UIElement[]
+  routes        UIRoute[]
+  semantics     UISemantic[]
+  events        UserEvent[]
+  struggles     StruggleEvent[]
+  analyses      FailureAnalysis[]
+  intervs       Intervention[]
+  imprs         InterventionImpression[]
+  usage         UsageMonth[]
+  ghInstalls    GitHubInstallation[]
+  ghRepos       GitHubRepo[]
+  detectedFrameworks DetectedFramework[]
+  intervCache   InterventionCache[]
+  ingestKeys    IngestKey[]
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model Membership {
+  id        String     @id @default(cuid())
+  userId    String
+  orgId     String
+  role      MemberRole @default(MEMBER)
+  createdAt DateTime   @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+  @@index([orgId])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Platform config + provider keys
+// ────────────────────────────────────────────────────────────────────────────
+
+enum PlatformStatus {
+  CREATED
+  MAPPING
+  ACTIVE
+  ERROR
+}
+
+model PlatformConfig {
+  id                  String         @id @default(cuid())
+  orgId               String         @unique
+  platformName        String
+  platformDescription String         @db.Text
+  repoUrl             String?
+  crawlerTarget       String?
+  status              PlatformStatus @default(CREATED)
+  // Safe-mode default ON for first 7 days post-install - see plan Phase 13.
+  safeMode            Boolean        @default(true)
+  safeModeUntil       DateTime?
+  // Routes (exact match) where interventions never render. Strings.
+  routeDenylist       Json           @default("[]")
+  // Routes where invasive interventions (DOM / BEHAVIOR / AUTO_FIX) are allowed.
+  invasiveAllowlist   Json           @default("[]")
+  // Per-event-type sampling rates (0.0–1.0). Shape:
+  //   { default: number, byType: { CLICK: number, HOVER: number, ... } }
+  // Empty object = sample everything (the SDK default).
+  // Surfaced into the SDK install snippet on /dashboard/install.
+  samplingConfig      Json           @default("{}")
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+enum ProviderKind {
+  DEEP
+  FAST
+}
+
+enum ProviderName {
+  ANTHROPIC
+  OPENAI
+  GOOGLE
+  CUSTOM
+}
+
+model ProviderKey {
+  id           String       @id @default(cuid())
+  orgId        String
+  kind         ProviderKind
+  provider     ProviderName
+  // AES-GCM ciphertext, base64-encoded. Includes authTag.
+  encryptedKey String       @db.Text
+  // Per-record IV (nonce), base64.
+  iv           String
+  // Last 4 chars of the plaintext key, for UI masking ("sk-...XYZ4").
+  lastFour     String
+  createdAt    DateTime     @default(now())
+  rotatedAt    DateTime?
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, kind])
+  @@index([orgId])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Static map (UI elements + routes + semantics)
+// ────────────────────────────────────────────────────────────────────────────
+
+enum ElementType {
+  BUTTON
+  INPUT
+  SELECT
+  FORM
+  LINK
+  CUSTOM
+}
+
+model UIElement {
+  // sh_<16-byte hex>; deterministic from (orgId, file, ast path).
+  id              String      @id
+  orgId           String
+  filePath        String
+  componentName   String?
+  elementType     ElementType
+  labelRaw        String?
+  // SHA-256 of labelRaw - used for matching when labelRaw is not stored due to privacy.
+  labelHash       String
+  handlerFunction String?
+  routeTarget     String?
+  // Rich extraction data. JSON for evolution without migration churn.
+  // Shape: ElementExtraction in src/lib/types/ui-map.ts.
+  extraction      Json        @default("{}")
+  // Inferred semantic role for fast filtering on the dashboard.
+  semanticRole    String?
+  // Form id/name this element belongs to.
+  formContext     String?
+  schemaVersion   Int         @default(1)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  org       Org              @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  semantics UISemantic[]
+  events    UserEvent[]
+  struggles StruggleEvent[]
+  analyses  FailureAnalysis[]
+  intervs   Intervention[]
+  cache     InterventionCache[]
+
+  @@index([orgId])
+  @@index([orgId, routeTarget])
+}
+
+model UIRoute {
+  id           String   @id @default(cuid())
+  orgId        String
+  path         String
+  parentPath   String?
+  // Route IDs (or external URLs) that lead INTO this route.
+  entryPoints  Json     @default("[]")
+  // Page title (from h1, <title>, or metadata).
+  title        String?
+  // Short description (from meta or first paragraph).
+  description  String?  @db.Text
+  // Source file that owns this route.
+  sourceFile   String?
+  // True if the page is gated by an auth check (heuristic).
+  authRequired Boolean  @default(false)
+  // Rich extraction data - sections, layout, params, etc. JSON for evolution.
+  extraction   Json     @default("{}")
+  schemaVersion Int     @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, path])
+  @@index([orgId])
+}
+
+model UISemantic {
+  id              String   @id @default(cuid())
+  orgId           String
+  elementId       String
+  // Cache key. SHA-256 of (siblings + route + parent component + platform description).
+  // Re-enrich when context changes, not just element code.
+  contextHash     String
+  semanticName    String
+  intent          String
+  expectedOutcome String   @db.Text
+  failureModes    Json     @default("[]")
+  // Rich fields produced by the enrichment LLM:
+  //   helpCopy (string), alternativeActions (string[]), dependencies (string[]),
+  //   riskLevel ('low' | 'medium' | 'high').
+  extraction      Json     @default("{}")
+  schemaVersion   Int      @default(1)
+  enrichedAt      DateTime @default(now())
+
+  org     Org       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  element UIElement @relation(fields: [elementId], references: [id], onDelete: Cascade)
+
+  @@unique([elementId, contextHash])
+  @@index([orgId])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Runtime events + struggle detection
+// ────────────────────────────────────────────────────────────────────────────
+
+enum EventType {
+  CLICK
+  INPUT_CHANGE
+  SUBMIT
+  NAVIGATION
+  HOVER
+  DWELL
+  CUSTOM
+}
+
+model UserEvent {
+  id            String    @id @default(cuid())
+  orgId         String
+  sessionId     String
+  // Hashed user identifier (or null for anonymous).
+  userIdHash    String?
+  elementId     String?
+  route         String
+  eventType     EventType
+  ts            DateTime
+  // PII-scrubbed key-value bag from the SDK. Examples:
+  //   DWELL          → { ms: 35000 }
+  //   HOVER          → {}
+  //   JS_ERROR       → { message, filename, lineno }
+  //   CUSTOM (track) → { kind: 'track', name: 'checkout_completed', ... }
+  //   intervention   → { kind: 'intervention_shown', iid }
+  meta          Json      @default("{}")
+  // For dedup on retries from the SDK's offline buffer.
+  idempotencyKey String?
+  schemaVersion Int       @default(1)
+
+  org     Org        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  element UIElement? @relation(fields: [elementId], references: [id], onDelete: SetNull)
+
+  @@unique([orgId, idempotencyKey])
+  @@index([orgId, ts(sort: Desc)])
+  @@index([orgId, sessionId, ts])
+  @@index([elementId])
+}
+
+enum StruggleType {
+  // Click patterns
+  RAGE_CLICK
+  DEAD_CLICK
+  INVALID_CLICK
+  MIS_CLICK
+  // Form patterns
+  THRASH
+  BACKTRACK
+  VALIDATION_LOOP
+  ABANDONED_FIELD
+  PASTE_REPEAT
+  REQUIRED_MISSED
+  FORMAT_ERROR
+  PASSWORD_RETRY
+  SLOW_FILL
+  // Navigation patterns
+  LOOP
+  SILENT_FAIL
+  BACK_THRASH
+  DEAD_END
+  QUICK_BOUNCE
+  CIRCULAR_NAV
+  // Discovery patterns
+  HOVER_HUNT
+  LONG_DWELL
+  RAPID_SCROLL
+  SCROLL_OVERSHOOT
+  IDLE_AFTER_LOAD
+  EMPTY_SEARCH
+  REPEAT_SEARCH
+  ZERO_RESULTS
+  FAILED_FILTER
+  // UI confusion
+  MENU_THRASH
+  TOOLTIP_HOVER_REPEAT
+  TAB_HOPPING
+  // Error patterns
+  ERROR_DISMISS
+  RETRY_LOOP
+  NOT_FOUND_BOUNCE
+  JS_ERROR
+  // Authentication
+  LOGIN_FAILURE
+  LOCKED_OUT
+  // Other
+  KEYBOARD_LOST_FOCUS
+  COPY_BOUNCE
+  HELP_HUNT
+}
+
+model StruggleEvent {
+  id        String       @id @default(cuid())
+  orgId     String
+  sessionId String
+  elementId String?
+  type      StruggleType
+  // 0.0–1.0
+  severity  Float
+  ts        DateTime
+
+  org     Org        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  element UIElement? @relation(fields: [elementId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, ts(sort: Desc)])
+  @@index([orgId, type])
+  @@index([elementId])
+}
+
+model FailureAnalysis {
+  id              String   @id @default(cuid())
+  orgId           String
+  elementId       String
+  rootCause       String   @db.Text
+  recommendations Json     @default("[]")
+  // 0.0–1.0
+  confidence      Float
+  enrichedAt      DateTime @default(now())
+
+  org     Org       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  element UIElement @relation(fields: [elementId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([elementId])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Interventions + impressions
+// ────────────────────────────────────────────────────────────────────────────
+
+enum InterventionType {
+  // Display interventions
+  OVERLAY
+  HIGHLIGHT
+  TOOLTIP
+  MODAL
+  BANNER
+  INLINE_HINT
+  SPOTLIGHT
+  TOUR
+  ICON_FLASH
+  ARROW
+  // Modification interventions (gated)
+  DOM
+  BEHAVIOR
+  AUTO_FIX
+  // Communication interventions
+  CONFIRM
+  ANNOUNCE
+}
+
+enum InterventionOutcome {
+  SUCCESS
+  ABANDON
+  DISMISSED
+}
+
+model Intervention {
+  id            String           @id @default(cuid())
+  orgId         String
+  elementId     String
+  type          InterventionType
+  // Renderer-specific config. Examples:
+  //   OVERLAY: { copy, anchor, dismissible }
+  //   DOM:     { selectors, mutation }
+  //   BEHAVIOR:{ handler, payload }
+  config        Json
+  enabled       Boolean          @default(true)
+  // Optional grouping for A/B tests; sibling rows share variantGroup.
+  variantGroup  String?
+  // Derived metrics (denormalized for fast dashboard reads).
+  impressions   Int              @default(0)
+  successes     Int              @default(0)
+  dismissals   Int               @default(0)
+  successRate   Float            @default(0)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  org     Org                      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  element UIElement                @relation(fields: [elementId], references: [id], onDelete: Cascade)
+  imprs   InterventionImpression[]
+
+  @@index([orgId])
+  @@index([orgId, variantGroup])
+  @@index([elementId])
+}
+
+model InterventionImpression {
+  id             String              @id @default(cuid())
+  orgId          String
+  interventionId String
+  sessionId      String
+  variant        String?
+  outcome        InterventionOutcome
+  ts             DateTime
+
+  org    Org          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  interv Intervention @relation(fields: [interventionId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, ts(sort: Desc)])
+  @@index([interventionId])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Usage metering (Phase 15) - separate deep vs fast token tracking
+// ────────────────────────────────────────────────────────────────────────────
+
+model UsageMonth {
+  id                 String   @id @default(cuid())
+  orgId              String
+  // First day of the month (UTC).
+  month              DateTime
+  mau                Int      @default(0)
+  events             Int      @default(0)
+  deepTokens         BigInt   @default(0)
+  fastTokens         BigInt   @default(0)
+  interventionsShown Int      @default(0)
+  updatedAt          DateTime @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, month])
+  @@index([orgId])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Pre-computed intervention cache (Phase 7 of plan)
+//
+// For each (orgId, elementId, struggleType), a small set of LLM-tailored
+// intervention variants generated offline using the DEEP key. Runtime dispatch
+// SELECTS from this cache (zero-LLM-call common path) instead of relying solely
+// on generic templates. When no cache row exists, the dispatcher falls back
+// to the in-code template library.
+// ────────────────────────────────────────────────────────────────────────────
+
+model InterventionCache {
+  id                String           @id @default(cuid())
+  orgId             String
+  elementId         String
+  struggleType      StruggleType
+  variantIndex      Int
+  // Same enum as Intervention.type; what renderer the SDK should use.
+  type              InterventionType
+  // Pre-rendered copy. Fully resolved - no {label}/{validation} placeholders.
+  copy              String           @db.Text
+  title             String?          @db.Text
+  helpCopy          String?          @db.Text
+  relatedElementIds Json             @default("[]")
+  // 0.0–1.0; the LLM's reported confidence in the variant.
+  confidence        Float            @default(0.7)
+  // Hash of (elementId, semanticContext, struggleType) - re-generate when
+  // the underlying element semantics drift.
+  contextHash       String
+  generatedAt       DateTime         @default(now())
+
+  org     Org       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  element UIElement @relation(fields: [elementId], references: [id], onDelete: Cascade)
+
+  @@unique([elementId, struggleType, variantIndex])
+  @@index([orgId])
+  @@index([elementId, struggleType])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Monthly active users (Phase 15) - accurate MAU via dedup log
+//
+// Each (orgId, userIdHash, monthStart) tuple records that the user was seen
+// in that month at least once. /api/events writes via createMany skipDups,
+// so duplicate inserts are idempotent + cheap. /dashboard/usage queries
+// COUNT(*) for the current month.
+// ────────────────────────────────────────────────────────────────────────────
+
+model MonthlyActiveUser {
+  id         String   @id @default(cuid())
+  orgId      String
+  userIdHash String
+  monthStart DateTime
+  firstSeen  DateTime @default(now())
+
+  @@unique([orgId, userIdHash, monthStart])
+  @@index([orgId, monthStart])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Per-org ingest authentication (Phase 14)
+//
+// SDK installs include a per-org bearer token. /api/events validates
+// `Authorization: Bearer <token>` against the SHA-256 hash stored here.
+// Plaintext is shown ONCE on creation; revocation is via revokedAt timestamp.
+// Falls back to raw X-Org-Id when REQUIRE_INGEST_KEY env is unset (dev mode).
+// ────────────────────────────────────────────────────────────────────────────
+
+model IngestKey {
+  id         String    @id @default(cuid())
+  orgId      String
+  // SHA-256 of the plaintext bearer token. Plaintext is never persisted.
+  hash       String    @unique
+  // First 8 chars of the plaintext for UI matching: "ck_AbCdEf..."
+  prefix     String
+  // Optional label so customers can keep track of which env they pasted it in.
+  label      String?
+  createdAt  DateTime  @default(now())
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// GitHub integration (Phase 11 of plan; scaffolding now)
+// ────────────────────────────────────────────────────────────────────────────
+
+model GitHubInstallation {
+  id              String   @id @default(cuid())
+  orgId           String
+  // GitHub's installation ID (numeric, unique per app+account).
+  installationId  Int      @unique
+  accountLogin    String
+  // "User" or "Organization"
+  accountType     String
+  repositoriesUrl String?
+  createdAt       DateTime @default(now())
+  removedAt       DateTime?
+
+  org   Org          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  repos GitHubRepo[]
+
+  @@index([orgId])
+}
+
+enum MappingStatus {
+  PENDING
+  IN_PROGRESS
+  SUCCEEDED
+  FAILED
+}
+
+model GitHubRepo {
+  id              String         @id @default(cuid())
+  orgId           String
+  installationId  String
+  // "owner/name"
+  fullName        String
+  defaultBranch   String?
+  // True if the user picked this repo to actually map.
+  selected        Boolean        @default(false)
+  lastMappedAt    DateTime?
+  mappingStatus   MappingStatus  @default(PENDING)
+  mappingError    String?        @db.Text
+  createdAt       DateTime       @default(now())
+
+  org          Org                @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  installation GitHubInstallation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  detected     DetectedFramework[]
+
+  @@unique([installationId, fullName])
+  @@index([orgId])
+}
+
+model DetectedFramework {
+  id          String   @id @default(cuid())
+  orgId       String
+  // Either tied to a GitHub repo, or null if discovered via crawler / manual.
+  repoId      String?
+  // Stable framework id from the registry (e.g., "next", "sveltekit", "astro").
+  frameworkId String
+  // Confidence 0.0–1.0.
+  confidence  Float
+  // Free-form evidence (which file/dep matched).
+  evidence    Json     @default("[]")
+  detectedAt  DateTime @default(now())
+
+  org  Org         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  repo GitHubRepo? @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([repoId])
+}

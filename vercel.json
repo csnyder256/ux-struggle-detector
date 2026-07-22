@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/cron/detect-struggles",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/compute-baselines",
+      "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/precompute-interventions",
+      "schedule": "0 * * * *"
+    }
+  ]
+}

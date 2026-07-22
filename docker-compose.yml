@@ -1,0 +1,41 @@
+# Local-dev infrastructure for Clarus Heal.
+#
+# Bring it up:    docker compose up -d
+# Tear it down:   docker compose down
+# Reset volumes:  docker compose down -v
+#
+# Postgres at localhost:5432 (matches the default DATABASE_URL in .env.example).
+# Adminer at http://localhost:8080 if you want a GUI to inspect the DB.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: clarus-pg
+    environment:
+      POSTGRES_USER: postgres
+      # Local-dev-only default. Matches the sample DATABASE_URL in .env.example.
+      # Change both together, and never reuse this value outside your machine.
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: clarus_heal
+    ports:
+      - '5432:5432'
+    volumes:
+      - clarus-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d clarus_heal']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  adminer:
+    image: adminer:4
+    container_name: clarus-adminer
+    restart: unless-stopped
+    ports:
+      - '8080:8080'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  clarus-pg-data:

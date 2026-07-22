@@ -1,0 +1,84 @@
+# --- dependencies ---
+node_modules/
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+.venv/
+venv/
+
+# --- build output ---
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# --- testing / caches ---
+coverage/
+.vitest/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyc
+*.pyo
+
+# --- secrets: never commit any real env file ---
+.env
+.env.*
+!.env.example
+!.env.sample
+*.local.yaml
+*.local.json
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+*credentials*.json
+*service-account*.json
+
+# --- local data / production state ---
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+/prisma/migrations/dev.db*
+/prisma/dev.db*
+state/
+runtime/
+data/
+*.dump
+*.sql.gz
+
+# --- real data exports ---
+*.csv
+*.tsv
+*.xlsx
+*.xls
+!**/fixtures/**/*.csv
+
+# --- logs ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+logs/
+
+# --- editor / OS ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- deploy ---
+.vercel
+
+# --- local tooling scratch ---
+.claude/

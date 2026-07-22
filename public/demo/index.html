@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Clarus Heal - SDK demo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      padding: 40px 24px 80px;
+      color: #111827;
+      background: #fafafa;
+      line-height: 1.5;
+    }
+    .container { max-width: 840px; margin: 0 auto; }
+    h1 { font-size: 28px; margin-bottom: 6px; }
+    h2 { font-size: 16px; margin: 28px 0 8px; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+    p { color: #475569; }
+    .card {
+      background: white; border: 1px solid #e5e7eb; border-radius: 10px;
+      padding: 18px; margin-top: 12px;
+    }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .row + .row { margin-top: 12px; }
+    label { display: block; font-size: 13px; font-weight: 500; margin: 0 0 6px; color: #1f2937; }
+    input, select, textarea {
+      width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px;
+      font-size: 14px; font-family: inherit;
+    }
+    button {
+      padding: 8px 14px; border: 1px solid #d1d5db; border-radius: 6px;
+      background: white; font-size: 14px; font-weight: 500; cursor: pointer;
+      font-family: inherit;
+    }
+    button.primary { background: #111827; color: white; border-color: #111827; }
+    button.danger { background: #ef4444; color: white; border-color: #ef4444; }
+    button.warn { background: #f59e0b; color: white; border-color: #f59e0b; }
+    button.ghost { background: transparent; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .bar { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding: 10px 14px; background: #f1f5f9; border-radius: 8px; font-size: 13px; color: #475569; }
+    .console {
+      margin-top: 24px; padding: 12px; background: #0f172a; color: #e5e7eb;
+      border-radius: 8px; font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 11px; max-height: 220px; overflow: auto; white-space: pre-wrap;
+    }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #e0f2fe; color: #075985; font-size: 11px; font-weight: 600; }
+    .grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Clarus Heal - SDK demo</h1>
+    <p>
+      Every button below triggers a different renderer. The SDK is loaded from
+      <code>/sdk.js</code> and runs in <em>console</em> mode - events log below
+      instead of being POSTed to <code>/api/events</code>.
+    </p>
+
+    <h2>Local rage-click detection</h2>
+    <div class="card">
+      <p>Click this button 3+ times in 2s to fire a HIGHLIGHT (pulse ring).</p>
+      <button class="danger">This button is broken on purpose</button>
+    </div>
+
+    <h2>Renderer gallery</h2>
+    <div class="card">
+      <p>One button per intervention renderer. Click any to see how it looks.</p>
+      <div class="grid" id="rendererGallery">
+        <button data-render="OVERLAY">Overlay (toast)</button>
+        <button data-render="HIGHLIGHT" data-render-style="pulse">Highlight (pulse)</button>
+        <button data-render="HIGHLIGHT" data-render-style="glow">Highlight (glow)</button>
+        <button data-render="SPOTLIGHT">Spotlight</button>
+        <button data-render="TOOLTIP">Tooltip</button>
+        <button data-render="MODAL">Modal</button>
+        <button data-render="BANNER" data-render-severity="info">Banner (info)</button>
+        <button data-render="BANNER" data-render-severity="warning">Banner (warn)</button>
+        <button data-render="BANNER" data-render-severity="error">Banner (error)</button>
+        <button data-render="INLINE_HINT">Inline hint</button>
+        <button data-render="ICON_FLASH">Icon flash</button>
+        <button data-render="ARROW">Arrow</button>
+        <button data-render="ANNOUNCE">Announce</button>
+      </div>
+    </div>
+
+    <h2>Form with synthetic struggles</h2>
+    <div class="card">
+      <form id="demoForm">
+        <label for="email">Email (PII gets scrubbed before send)</label>
+        <input id="email" name="email" type="email" placeholder="you@example.com" />
+        <label for="cc" style="margin-top: 12px;">Card number (also scrubbed)</label>
+        <input id="cc" name="cc" placeholder="4111 1111 1111 1111" />
+        <div class="row" style="margin-top: 16px;">
+          <button type="submit" class="primary">Submit</button>
+          <button type="button" data-emulate="VALIDATION_ERROR">Trigger validation error</button>
+          <button type="button" data-emulate="JS_ERROR">Trigger JS error</button>
+        </div>
+      </form>
+    </div>
+
+    <h2>Search</h2>
+    <div class="card">
+      <form id="searchForm" data-sh-form-kind="search">
+        <label for="q">Query</label>
+        <input id="q" name="q" placeholder="Type and submit (mark as search via data-sh-form-kind)" />
+        <div class="row" style="margin-top: 12px;">
+          <button type="submit" class="primary">Search</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="bar">
+      <span class="badge">SESSION ID</span>
+      <code id="sid"> - </code>
+    </div>
+
+    <h2>Live event log</h2>
+    <div class="console" id="log">(waiting for events…)</div>
+    <p style="font-size: 12px; color: #64748b;">
+      Switch <code>endpoint</code> from <code>'console'</code> to
+      <code>'/api/events'</code> in this page&rsquo;s script tag, then run
+      <code>pnpm dev</code> with Postgres up, to see real server-dispatched
+      interventions render.
+    </p>
+  </div>
+
+  <script src="/sdk.js"></script>
+  <script>
+    // Tee console.log
+    const logEl = document.getElementById('log')
+    let lines = []
+    const orig = console.log.bind(console)
+    console.log = function (...args) {
+      orig(...args)
+      const msg = args
+        .map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a))
+        .join(' ')
+      lines.push(msg)
+      if (lines.length > 80) lines = lines.slice(-80)
+      logEl.textContent = lines.join('\n')
+      logEl.scrollTop = logEl.scrollHeight
+    }
+
+    // Suppress real form submission
+    document.querySelectorAll('form').forEach(f => f.addEventListener('submit', (e) => e.preventDefault()))
+
+    // Boot the SDK
+    // Append ?live=1&orgId=YOUR_ORG_ID to the URL to flip from console mode
+    // (default) to real server dispatch via /api/events.
+    const qs = new URLSearchParams(location.search)
+    const live = qs.get('live') === '1'
+    const orgId = qs.get('orgId') || 'demo-org'
+    ClarusHeal.initSelfHealing({
+      orgId,
+      endpoint: live ? '/api/events' : 'console',
+      flushIntervalMs: live ? 2000 : 2000,
+      enableLocalDemoOverlays: true,
+    })
+    if (live) {
+      const banner = document.createElement('div')
+      banner.style.cssText =
+        'position: fixed; top: 0; left: 0; right: 0; padding: 8px 16px; background: #10b981; color: white; font-size: 13px; text-align: center; z-index: 999999; font-family: -apple-system, BlinkMacSystemFont, sans-serif;'
+      banner.textContent = '🟢 LIVE MODE - events stream to /api/events. Server-dispatched interventions will render automatically.'
+      document.body.prepend(banner)
+    }
+
+    document.getElementById('sid').textContent = sessionStorage.getItem('__sh_sid_v1__') || ' - '
+
+    // Wire up renderer gallery - directly invoke renderIntervention.
+    document.getElementById('rendererGallery').addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-render]')
+      if (!btn) return
+      const type = btn.dataset.render
+      const style = btn.dataset.renderStyle
+      const severity = btn.dataset.renderSeverity
+      const id = `demo_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+      // Tag the button with a sh-id so target-based renderers can highlight it.
+      const targetId = btn.getAttribute('data-sh-id') || `sh_${id.padEnd(36, '0').slice(0,35)}`
+      btn.setAttribute('data-sh-id', targetId)
+
+      let copy = "Looks like you're trying to do something. Here's a hint."
+      let title = 'Heads up'
+      switch (type) {
+        case 'OVERLAY': copy = "Looks like you're trying to save. Try again - sometimes it's slow."; break
+        case 'HIGHLIGHT': copy = 'Try the highlighted action.'; break
+        case 'SPOTLIGHT': copy = 'Focus here - this is what you want.'; break
+        case 'TOOLTIP': copy = 'This button submits the form.'; break
+        case 'MODAL': copy = 'Looks stuck. Want a hand?'; title = 'Need a hand?'; break
+        case 'BANNER': copy = "Heads up - something's not quite right."; break
+        case 'INLINE_HINT': copy = 'Almost - try a shorter value.'; break
+        case 'ICON_FLASH': copy = ''; break
+        case 'ARROW': copy = 'It points down at the button.'; break
+        case 'ANNOUNCE': copy = 'Screen readers will hear this.'; break
+      }
+      ClarusHeal.renderIntervention({
+        id,
+        type,
+        targetElementId: targetId,
+        copy,
+        title,
+        options: {
+          ...(style ? { style } : {}),
+          ...(severity ? { severity } : {}),
+        },
+        autoDismissMs: 6000,
+      })
+    })
+
+    // Emulate validation / JS error events (no real CustomEvent path; just fire).
+    document.querySelectorAll('[data-emulate]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const kind = el.getAttribute('data-emulate')
+        if (kind === 'VALIDATION_ERROR') {
+          document.dispatchEvent(new CustomEvent('clarus-heal:validation', {
+            detail: { kind: 'format', field: 'email' }
+          }))
+        } else if (kind === 'JS_ERROR') {
+          // Synthetic - throwing inside a microtask so the global error handler picks it up.
+          setTimeout(() => { throw new Error('Demo: synthetic JS error') }, 0)
+        }
+      })
+    })
+  </script>
+</body>
+</html>
