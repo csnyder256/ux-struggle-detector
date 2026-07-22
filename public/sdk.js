@@ -23,12 +23,15 @@ var ClarusHeal = (() => {
   // src/sdk/index.ts
   var index_exports = {};
   __export(index_exports, {
+    identify: () => identify,
     initSelfHealing: () => initSelfHealing,
-    renderIntervention: () => renderIntervention
+    readAutoInitOptions: () => readAutoInitOptions,
+    renderIntervention: () => renderIntervention,
+    track: () => track
   });
 
   // src/lib/types/events.ts
-  var EVENT_SCHEMA_VERSION = 2;
+  var EVENT_SCHEMA_VERSION = 3;
   var DEFAULT_STRUGGLE_RULES = {
     rageClick: { minClicks: 3, windowMs: 2e3 },
     deadClick: {
@@ -157,8 +160,30 @@ var ClarusHeal = (() => {
     /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
     // 13–19 digit credit-card-shaped runs (allowing spaces or dashes)
     /\b(?:\d[ -]?){13,19}\b/g,
-    // SSN
-    /\b\d{3}-\d{2}-\d{4}\b/g
+    // US SSN
+    /\b\d{3}-\d{2}-\d{4}\b/g,
+    // US phone (xxx) xxx-xxxx / xxx-xxx-xxxx / +1 xxx xxx xxxx etc.
+    /(?:\+?1[\s-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b/g,
+    // International phone with country code (8+ digits, common formats)
+    /\+\d{1,3}[\s.-]?\d{2,4}[\s.-]?\d{2,4}[\s.-]?\d{2,4}\b/g,
+    // IBAN (rough - country letters + 2 check digits + up to 30 chars)
+    /\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/g,
+    // IPv4
+    /\b(?:25[0-5]|2[0-4]\d|[01]?\d\d?)(?:\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)){3}\b/g,
+    // IPv6 (full + compressed forms - best-effort)
+    /\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b/g,
+    /\b(?:[0-9a-fA-F]{1,4}:){1,7}:[0-9a-fA-F]{0,4}\b/g,
+    // JWT (three base64url segments separated by dots)
+    /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,
+    // AWS access key id (AKIA / ASIA prefixed; 20 char total)
+    /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
+    // GitHub fine-grained / classic personal access tokens
+    /\bgh[pousr]_[A-Za-z0-9]{36,251}\b/g,
+    // Stripe test/live secret keys
+    /\b(?:sk|pk|rk)_(?:test|live)_[A-Za-z0-9]{20,}\b/g,
+    // Anthropic / OpenAI keys (rough - key shape, not exact)
+    /\bsk-ant-[A-Za-z0-9_-]{20,}\b/g,
+    /\bsk-[A-Za-z0-9]{20,}\b/g
   ];
   function scrubText(text, extra = []) {
     let out = text;
@@ -210,12 +235,13 @@ var ClarusHeal = (() => {
 
   // src/sdk/transport.ts
   var Transport = class {
-    constructor(orgId, endpoint, buffer, clockOffsetMs = 0, onInterventions) {
+    constructor(orgId, endpoint, buffer, clockOffsetMs = 0, onInterventions, ingestKey) {
       this.orgId = orgId;
       this.endpoint = endpoint;
       this.buffer = buffer;
       this.clockOffsetMs = clockOffsetMs;
       this.onInterventions = onInterventions;
+      this.ingestKey = ingestKey;
     }
     async flush() {
       const events = this.buffer.drain();
@@ -229,13 +255,15 @@ var ClarusHeal = (() => {
         console.log("[clarus-heal] flush", body);
         return { sent: events.length };
       }
+      const headers = {
+        "Content-Type": "application/json",
+        "X-Org-Id": this.orgId
+      };
+      if (this.ingestKey) headers["Authorization"] = `Bearer ${this.ingestKey}`;
       try {
         const res = await fetch(this.endpoint, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Org-Id": this.orgId
-          },
+          headers,
           body: JSON.stringify(body),
           keepalive: true
         });
@@ -405,6 +433,43 @@ var ClarusHeal = (() => {
     if (ms <= 0) return;
     window.setTimeout(() => el.remove(), ms);
   }
+  function attachEscDismiss(el, interventionId) {
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      if (!document.body.contains(el)) {
+        document.removeEventListener("keydown", onKey, true);
+        return;
+      }
+      if (interventionId) reportOutcome(interventionId, "dismissed");
+      el.remove();
+      document.removeEventListener("keydown", onKey, true);
+    };
+    document.addEventListener("keydown", onKey, true);
+  }
+  function trapFocus(el) {
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const onKey = (e) => {
+      if (e.key !== "Tab") return;
+      const focusable = el.querySelectorAll(
+        'a[href], button:not([disabled]), textarea, input:not([disabled]), select, [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      previouslyFocused?.focus?.();
+    };
+  }
   function flashRing(target, kind) {
     const rect = target.getBoundingClientRect();
     const ring = document.createElement("div");
@@ -429,14 +494,17 @@ var ClarusHeal = (() => {
     card.className = "__sh_card__";
     card.setAttribute("role", "status");
     card.setAttribute("aria-live", "polite");
+    const conf = d.confidence ?? 0.6;
+    const accent = conf >= 0.85 ? "#3b82f6" : conf >= 0.6 ? "#a78bfa" : "#cbd5e1";
     Object.assign(card.style, {
       position: "fixed",
       bottom: "24px",
       right: "24px",
-      maxWidth: "360px",
+      maxWidth: "380px",
       background: "white",
       color: "#111827",
       border: "1px solid #e5e7eb",
+      borderLeft: `4px solid ${accent}`,
       borderRadius: "10px",
       padding: "14px 14px 14px 16px",
       boxShadow: "0 12px 36px rgba(0,0,0,0.18)",
@@ -448,15 +516,51 @@ var ClarusHeal = (() => {
     });
     const row = document.createElement("div");
     Object.assign(row.style, { display: "flex", alignItems: "flex-start", gap: "8px" });
+    const body = document.createElement("div");
+    body.style.flex = "1";
     const text = document.createElement("div");
-    text.style.flex = "1";
     text.innerHTML = decodeHtml(d.copy);
+    body.appendChild(text);
+    if (d.helpCopy) {
+      const help = document.createElement("div");
+      help.style.cssText = "margin-top:6px;font-size:12px;color:#6b7280;";
+      help.textContent = stripHtml(d.helpCopy);
+      body.appendChild(help);
+    }
+    if (d.relatedElementIds && d.relatedElementIds.length > 0) {
+      const links = document.createElement("div");
+      links.style.cssText = "margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;";
+      for (const rid of d.relatedElementIds.slice(0, 3)) {
+        const el = document.querySelector(`[data-sh-id="${rid}"]`);
+        if (!el) continue;
+        const lbl = el.getAttribute("aria-label") ?? el.textContent?.trim().slice(0, 40);
+        if (!lbl) continue;
+        const a = document.createElement("a");
+        a.textContent = `Try \u201C${lbl}\u201D`;
+        a.style.cssText = "font-size:11px;color:#1d4ed8;text-decoration:underline;cursor:pointer;";
+        a.addEventListener("click", (e) => {
+          e.preventDefault();
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          el.focus?.();
+        });
+        links.appendChild(a);
+      }
+      if (links.children.length > 0) body.appendChild(links);
+    }
+    if (d.diagnostic && window.__CLARUS_DEBUG__) {
+      const diag = document.createElement("div");
+      diag.style.cssText = "margin-top:8px;padding-top:8px;border-top:1px dashed #e5e7eb;font-family:ui-monospace,SFMono-Regular,monospace;font-size:10px;color:#6b7280;";
+      diag.textContent = `${d.diagnostic.struggleType} \xB7 sev ${d.diagnostic.severity.toFixed(2)} \xB7 v${d.diagnostic.variantIndex ?? 0} \xB7 conf ${conf.toFixed(2)}`;
+      body.appendChild(diag);
+    }
     const dismiss = makeDismissBtn(() => card.remove(), d.id);
-    row.appendChild(text);
+    row.appendChild(body);
     row.appendChild(dismiss);
     card.appendChild(row);
     root().appendChild(card);
-    autoCleanup(card, ttl);
+    attachEscDismiss(card, d.id);
+    const adjustedTtl = conf >= 0.85 ? ttl : conf >= 0.5 ? Math.max(4e3, ttl * 0.75) : Math.max(3e3, ttl * 0.5);
+    autoCleanup(card, adjustedTtl);
   }
   function renderHighlight(target, d, ttl) {
     if (!target) return;
@@ -542,8 +646,10 @@ var ClarusHeal = (() => {
     });
     const card = document.createElement("div");
     card.className = "__sh_card__";
-    card.setAttribute("role", "dialog");
+    card.setAttribute("role", "alertdialog");
     card.setAttribute("aria-modal", "true");
+    if (d.title) card.setAttribute("aria-labelledby", "__sh_modal_title__");
+    card.setAttribute("aria-describedby", "__sh_modal_body__");
     Object.assign(card.style, {
       background: "white",
       color: "#111827",
@@ -555,11 +661,13 @@ var ClarusHeal = (() => {
     });
     if (d.title) {
       const h = document.createElement("h2");
+      h.id = "__sh_modal_title__";
       h.textContent = d.title;
       Object.assign(h.style, { fontSize: "18px", fontWeight: "600", margin: "0 0 8px" });
       card.appendChild(h);
     }
     const body = document.createElement("div");
+    body.id = "__sh_modal_body__";
     body.innerHTML = decodeHtml(d.copy);
     body.style.fontSize = "14px";
     body.style.lineHeight = "1.5";
@@ -584,11 +692,20 @@ var ClarusHeal = (() => {
       fontWeight: "500",
       cursor: "pointer"
     });
-    close.addEventListener("click", () => backdrop.remove());
+    let teardownFocus = null;
+    const dismiss = () => {
+      teardownFocus?.();
+      reportOutcome(d.id, "dismissed");
+      backdrop.remove();
+    };
+    close.addEventListener("click", dismiss);
     actions.appendChild(close);
     card.appendChild(actions);
     backdrop.appendChild(card);
     root().appendChild(backdrop);
+    teardownFocus = trapFocus(card);
+    close.focus();
+    attachEscDismiss(backdrop, d.id);
   }
   function renderBanner(d, ttl) {
     const bg = d.options?.severity === "error" ? "#fee2e2" : d.options?.severity === "warning" ? "#fef3c7" : "#dbeafe";
@@ -619,6 +736,7 @@ var ClarusHeal = (() => {
     banner.appendChild(text);
     banner.appendChild(makeDismissBtn(() => banner.remove(), d.id));
     root().appendChild(banner);
+    attachEscDismiss(banner, d.id);
     autoCleanup(banner, ttl);
   }
   function renderInlineHint(target, d, ttl) {
@@ -719,6 +837,30 @@ var ClarusHeal = (() => {
 
   // src/sdk/index.ts
   var initialized = false;
+  var _state = null;
+  function track(name, props) {
+    if (!_state) {
+      if (typeof console !== "undefined") {
+        console.warn("[clarus-heal] track() called before initSelfHealing()");
+      }
+      return;
+    }
+    const meta = { kind: "track", name };
+    if (props) for (const k of Object.keys(props)) meta[k] = props[k] ?? null;
+    void _state.emit("CUSTOM", null, meta);
+  }
+  function identify(userId) {
+    if (!_state) return;
+    void hashUserIdentifier(userId).then((hash) => _state?.setUserIdHash(hash));
+  }
+  async function hashUserIdentifier(userId) {
+    const data = new TextEncoder().encode(userId);
+    const buf = await crypto.subtle.digest("SHA-256", data);
+    const bytes = new Uint8Array(buf);
+    let hex = "";
+    for (let i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, "0");
+    return hex.slice(0, 32);
+  }
   function initSelfHealing(opts) {
     if (initialized) return;
     initialized = true;
@@ -734,10 +876,75 @@ var ClarusHeal = (() => {
     const sessionId = ensureSessionId();
     const disabled = new Set(opts.disableEventTypes ?? []);
     const buffer = new EventBuffer();
-    const transport = new Transport(opts.orgId, endpoint, buffer, 0, (interventions) => {
-      for (const interv of interventions) renderIntervention(interv);
-    });
+    const transport = new Transport(
+      opts.orgId,
+      endpoint,
+      buffer,
+      0,
+      (interventions) => {
+        for (const interv of interventions) renderIntervention(interv);
+      },
+      opts.ingestKey
+    );
     const rage = new RageClickDetector();
+    const pageMountedAt = Date.now();
+    const initialReferrer = document.referrer;
+    function snapshotPageContext() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const formFactor = w <= 640 ? "mobile" : w <= 1024 ? "tablet" : "desktop";
+      const h1 = document.querySelector("h1")?.textContent?.trim() ?? void 0;
+      return {
+        title: document.title || void 0,
+        h1: h1 ? h1.slice(0, 200) : void 0,
+        viewportW: w,
+        viewportH: h,
+        formFactor,
+        referrer: initialReferrer || void 0,
+        ageMs: Date.now() - pageMountedAt
+      };
+    }
+    function elementContextFor(el) {
+      if (!el) return void 0;
+      const ctx = {};
+      const text = (el.textContent ?? "").trim();
+      if (text && text.length < 80) ctx.label = text;
+      const aria = el.getAttribute("aria-label");
+      if (aria) ctx.label = aria;
+      const role = inferRole(el);
+      if (role) ctx.role = role;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+        ctx.touched = true;
+        const defaultVal = el instanceof HTMLSelectElement ? Array.from(el.options).find((o) => o.defaultSelected)?.value ?? "" : el.defaultValue;
+        ctx.dirty = el.value !== defaultVal;
+        if ("value" in el && typeof el.value === "string") ctx.valueLength = el.value.length;
+        if (el.disabled) ctx.disabled = true;
+        if (typeof el.checkValidity === "function" && !el.checkValidity()) {
+          const flags = [];
+          const v = el.validity;
+          if (v?.valueMissing) flags.push("valueMissing");
+          if (v?.typeMismatch) flags.push("typeMismatch");
+          if (v?.patternMismatch) flags.push("patternMismatch");
+          if (v?.tooShort) flags.push("tooShort");
+          if (v?.tooLong) flags.push("tooLong");
+          if (v?.rangeUnderflow) flags.push("rangeUnderflow");
+          if (v?.rangeOverflow) flags.push("rangeOverflow");
+          if (v?.stepMismatch) flags.push("stepMismatch");
+          if (flags.length > 0) ctx.validity = flags.join(",");
+        }
+      }
+      if (el instanceof HTMLButtonElement && el.disabled) ctx.disabled = true;
+      const form = el.form ?? el.closest("form");
+      if (form) {
+        ctx.formId = form.id || form.getAttribute("name") || "(unnamed-form)";
+        try {
+          ctx.formValid = form.checkValidity();
+        } catch {
+        }
+      }
+      if (!hasHandler(el)) ctx.dead = true;
+      return Object.keys(ctx).length > 0 ? ctx : void 0;
+    }
     setOutcomeCallback((interventionId, outcome) => {
       void emit("CUSTOM", null, {
         kind: `intervention_${outcome}`,
@@ -748,8 +955,30 @@ var ClarusHeal = (() => {
       const rand = Math.random().toString(36).slice(2, 10);
       return `${sessionId}_${Date.now()}_${rand}`;
     }
+    let userIdHash = null;
+    const samplingExempt = /* @__PURE__ */ new Set(["JS_ERROR", "VALIDATION_ERROR"]);
+    function shouldSample(eventType, el) {
+      const cfg = opts.sampling;
+      if (cfg === void 0) return true;
+      if (samplingExempt.has(eventType)) return true;
+      if (typeof cfg === "number") {
+        return cfg >= 1 ? true : cfg <= 0 ? false : Math.random() < cfg;
+      }
+      if (typeof cfg === "function") {
+        try {
+          return cfg(eventType, el) !== false;
+        } catch {
+          return true;
+        }
+      }
+      const perType = cfg.byType?.[eventType];
+      const rate = typeof perType === "number" ? perType : cfg.default ?? 1;
+      return rate >= 1 ? true : rate <= 0 ? false : Math.random() < rate;
+    }
     async function emit(eventType, el, meta) {
       if (disabled.has(eventType)) return null;
+      const isOutcome = eventType === "CUSTOM" && typeof meta?.kind === "string" && meta.kind.startsWith("intervention_");
+      if (!isOutcome && !shouldSample(eventType, el)) return null;
       let elementId = null;
       if (el) {
         try {
@@ -762,12 +991,14 @@ var ClarusHeal = (() => {
         schemaVersion: EVENT_SCHEMA_VERSION,
         idempotencyKey: makeIdempotencyKey(),
         sessionId,
-        userIdHash: null,
+        userIdHash,
         elementId,
         route: location.pathname,
         eventType,
         ts: (/* @__PURE__ */ new Date()).toISOString(),
-        meta
+        meta,
+        page: snapshotPageContext(),
+        element: elementContextFor(el)
       };
       buffer.push(event);
       return event;
@@ -793,7 +1024,7 @@ var ClarusHeal = (() => {
               id: `local_${Date.now()}`,
               type: "HIGHLIGHT",
               targetElementId: ev.elementId,
-              copy: "Looks like you&rsquo;re having trouble with this. Take a breath \u2014 we&rsquo;re working on it.",
+              copy: "Looks like you&rsquo;re having trouble with this. Take a breath - we&rsquo;re working on it.",
               options: { style: "pulse" },
               autoDismissMs: 6e3
             });
@@ -957,6 +1188,12 @@ var ClarusHeal = (() => {
       _pushState(data, unused, url);
       void emit("NAVIGATION", null, { trigger: "pushstate" });
     };
+    _state = {
+      emit,
+      setUserIdHash: (h) => {
+        userIdHash = h;
+      }
+    };
     window.setInterval(() => void transport.flush(), flushIntervalMs);
     window.addEventListener("beforeunload", () => {
       void transport.flush();
@@ -964,6 +1201,45 @@ var ClarusHeal = (() => {
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") void transport.flush();
     });
+  }
+  function readAutoInitOptions(doc) {
+    let source = doc ?? null;
+    if (!source) {
+      if (typeof document === "undefined") return null;
+      source = {
+        currentScript: document.currentScript,
+        scripts: Array.from(
+          document.querySelectorAll("script[data-org-id]")
+        )
+      };
+    }
+    let candidate = null;
+    if (source.currentScript && source.currentScript.dataset.orgId) {
+      candidate = source.currentScript;
+    } else if (source.scripts.length > 0) {
+      candidate = source.scripts[source.scripts.length - 1] ?? null;
+    }
+    if (!candidate) return null;
+    const orgId = candidate.dataset.orgId;
+    if (!orgId) return null;
+    const ingestKey = candidate.dataset.ingestKey || void 0;
+    const endpoint = candidate.dataset.endpoint || void 0;
+    const flushIntervalMsRaw = candidate.dataset.flushIntervalMs;
+    const flushIntervalMs = flushIntervalMsRaw ? Number(flushIntervalMsRaw) : void 0;
+    return {
+      orgId,
+      ingestKey,
+      endpoint,
+      flushIntervalMs: Number.isFinite(flushIntervalMs) ? flushIntervalMs : void 0
+    };
+  }
+  function autoInitFromScriptTag() {
+    const opts = readAutoInitOptions();
+    if (opts) initSelfHealing(opts);
+  }
+  try {
+    autoInitFromScriptTag();
+  } catch {
   }
   function ensureSessionId() {
     const KEY = "__sh_sid_v1__";

@@ -114,14 +114,30 @@ if (Test-Path $envPath) {
         Write-Fail "Failed to generate CRON_SECRET via node."
     }
 
+    # Replace the whole assignment, whatever placeholder .env.example ships
+    # with. [^\r\n]* (not .*$) so CRLF checkouts keep their carriage returns.
     $populated = $template `
-        -replace 'AUTH_SECRET=""', "AUTH_SECRET=`"$authSecret`"" `
-        -replace 'KEY_ENCRYPTION_KEY=""', "KEY_ENCRYPTION_KEY=`"$keyEnc`"" `
-        -replace 'CRON_SECRET=""', "CRON_SECRET=`"$cronSecret`""
+        -replace '(?m)^AUTH_SECRET=[^\r\n]*', "AUTH_SECRET=`"$authSecret`"" `
+        -replace '(?m)^KEY_ENCRYPTION_KEY=[^\r\n]*', "KEY_ENCRYPTION_KEY=`"$keyEnc`"" `
+        -replace '(?m)^CRON_SECRET=[^\r\n]*', "CRON_SECRET=`"$cronSecret`""
 
     # Write UTF-8 without BOM so .env parsers don't choke on it.
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($envPath, $populated, $utf8NoBom)
+
+    # Do not claim success unless the generated values actually landed.
+    $written = Get-Content $envPath
+    foreach ($pair in @(
+        @('AUTH_SECRET', $authSecret),
+        @('KEY_ENCRYPTION_KEY', $keyEnc),
+        @('CRON_SECRET', $cronSecret)
+    )) {
+        $expected = '{0}="{1}"' -f $pair[0], $pair[1]
+        if (-not ($written -contains $expected)) {
+            Write-Fail "setup.ps1 failed to write a generated $($pair[0]) into .env. Set it by hand (see .env.example)."
+        }
+    }
+
     Write-Ok ".env created with auto-generated AUTH_SECRET / KEY_ENCRYPTION_KEY / CRON_SECRET"
     Write-Warn "You still need to fill in DATABASE_URL and EMAIL_SERVER_* by hand. See GETTING_STARTED.md."
 }

@@ -86,14 +86,26 @@ else
   cp .env.example .env
 
   # Use awk for portable in-place edits (sed -i is BSD/GNU incompatible).
+  # Match the whole assignment, whatever placeholder .env.example ships with.
   tmp="$(mktemp)"
   awk -v a="$AUTH_SECRET" -v k="$KEY_ENC" -v c="$CRON_SECRET" '
-    /^AUTH_SECRET=""/         { print "AUTH_SECRET=\"" a "\""; next }
-    /^KEY_ENCRYPTION_KEY=""/  { print "KEY_ENCRYPTION_KEY=\"" k "\""; next }
-    /^CRON_SECRET=""/         { print "CRON_SECRET=\"" c "\""; next }
+    /^AUTH_SECRET=/         { print "AUTH_SECRET=\"" a "\""; next }
+    /^KEY_ENCRYPTION_KEY=/  { print "KEY_ENCRYPTION_KEY=\"" k "\""; next }
+    /^CRON_SECRET=/         { print "CRON_SECRET=\"" c "\""; next }
     { print }
   ' .env > "$tmp"
   mv "$tmp" .env
+
+  # Do not claim success unless the generated values actually landed.
+  assert_written() {
+    got="$(grep -m1 "^$1=" .env || true)"
+    if [ "$got" != "$1=\"$2\"" ]; then
+      fail "setup.sh failed to write a generated $1 into .env. Set it by hand (see .env.example)."
+    fi
+  }
+  assert_written AUTH_SECRET        "$AUTH_SECRET"
+  assert_written KEY_ENCRYPTION_KEY "$KEY_ENC"
+  assert_written CRON_SECRET        "$CRON_SECRET"
 
   ok ".env created with auto-generated AUTH_SECRET / KEY_ENCRYPTION_KEY / CRON_SECRET"
   warn "You still need to fill in DATABASE_URL and EMAIL_SERVER_* by hand. See GETTING_STARTED.md."

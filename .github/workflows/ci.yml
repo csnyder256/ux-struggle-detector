@@ -47,5 +47,10 @@ jobs:
       - name: Test
         run: pnpm test
 
-      - name: Build SDK
-        run: pnpm sdk:build:min
+      - name: Build SDK bundles
+        run: |
+          pnpm sdk:build
+          pnpm sdk:build:min
+
+      - name: Fail if the checked-in SDK bundles are stale
+        run: git diff --exit-code -- public/sdk.js public/sdk.min.js

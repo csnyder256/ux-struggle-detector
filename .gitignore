@@ -79,6 +79,3 @@ Thumbs.db
 
 # --- deploy ---
 .vercel
-
-# --- local tooling scratch ---
-.claude/

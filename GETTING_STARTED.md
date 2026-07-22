@@ -232,15 +232,15 @@ Welcome to the dashboard. Sidebar has SDK, Repos, Flow Map, Friction Points, Ele
 
 ## Step 10 - see it in action without writing any client code
 
-If you don&rsquo;t have an app to integrate with yet, two paths to see the dashboard come alive:
+If you don't have an app to integrate with yet, two paths to see the dashboard come alive:
 
-**Path A - synthetic seed.** Go to <http://localhost:3000/dashboard/settings>, click **Seed demo data**. The dashboard fills with 8 mapped UI elements, 8 sessions of synthetic events, 16 struggle events across 8 detection types, and 6 interventions with realistic counts.
+**Path A - synthetic seed.** Go to <http://localhost:3000/dashboard/settings>, click **Seed demo data**. The dashboard fills with 8 mapped UI elements, 8 sessions of synthetic events, 16 struggle events across 8 detection types, and 6 element/struggle pairs carrying 12 intervention variants with realistic counts.
 
 **Path B - drive it from the SDK demo page.**
 
 1. Go to <http://localhost:3000/dashboard/install> and copy your `orgId`.
 2. Open <http://localhost:3000/demo/?live=1&orgId=YOUR_ORG_ID> in a new tab. The green LIVE banner confirms the SDK is posting to `/api/events`.
-3. Click around - buttons, the form, the search bar. Every click flows into the dashboard. Click the red &ldquo;broken&rdquo; button 3+ times to fire a rage-click intervention.
+3. Click around - buttons, the form, the search bar. Every click flows into the dashboard. Click the red "broken" button 3+ times to fire a rage-click intervention.
 4. Refresh <http://localhost:3000/dashboard> to see your sessions, struggles, and interventions populate.
 
 You can also click **Ping /api/events** on `/dashboard/install` to round-trip a synthetic event server-side without leaving the dashboard.
@@ -250,7 +250,7 @@ You can also click **Ping /api/events** on `/dashboard/install` to round-trip a 
 ## What's optional?
 
 - **GitHub onboarding path.** If you want the "Connect GitHub" flow to work, follow [GITHUB_SETUP.md](GITHUB_SETUP.md). It's a one-time admin step (registering a GitHub App).
-- **Crawler onboarding path.** Not yet implemented - currently a placeholder.
+- **Crawler onboarding path.** Implemented and usable without any admin setup: `/onboarding/crawler` runs the HTTP crawler and falls back to the Playwright crawler for SPA shells. Playwright browsers are not installed by `pnpm install`, so run `pnpm exec playwright install chromium` first if you want the SPA path.
 
 ---
 
@@ -304,5 +304,5 @@ pnpm dev
 
 - [README.md](README.md) - high-level project overview.
 - [GITHUB_SETUP.md](GITHUB_SETUP.md) - register a GitHub App for the "Connect GitHub" path.
-- `prisma/schema.prisma` - the 26-model data model, if you're going to modify the code.
+- `prisma/schema.prisma` - the 23-model data model, if you're going to modify the code.
 - `src/lib/types/` - the single sources of truth shared by the parser, the SDK, and the server.

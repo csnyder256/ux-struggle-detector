@@ -65,14 +65,14 @@ flowchart TD
 - **Framework detection** (`registry.ts`, `detector.ts`) scores a repo against 46 registry entries across 22 families using four independent signals: `package.json` dependencies, config file presence, file extensions under `src/`, and npm script contents. It reports a confidence score and is deliberately biased toward under-reporting, because a wrong framework guess cascades into wrong parsing, and an honest "I don't know" is recoverable while confidently bad output is not.
 - **React, Next, Remix and Preact** go through a Babel AST parser (`react.ts`, 797 lines) that walks JSX, resolves handler functions, and extracts validation attributes.
 - **Everything else** (Vue, Svelte, Angular, Astro, Solid, Qwik, Lit, Alpine, HTMX and the rest) routes to a universal template scanner (`universal-html.ts`, 703 lines) with per-family route detection. This is a deliberate accuracy tradeoff, documented in `parsers/index.ts`: every framework gets a working extraction path on day one.
-- **GitHub ingestion** goes entirely through the Octokit tree and blob API. No `git clone`, no shell-out, no filesystem dependency, which is what makes the mapper deployable to a serverless host.
+- **GitHub ingestion** goes entirely through the Octokit tree and blob API. No `git clone` and no shell-out; fetched blobs are materialized into an `os.tmpdir()` scratch directory that is removed in a `finally` block, so the mapper deploys to any serverless host with a writable `/tmp`.
 - **Live sites** can be crawled instead, either with a plain HTML fetcher (`crawler.ts`) or a Playwright-driven crawler for SPAs (`playwright-crawler.ts`).
 
 Every extracted element gets a deterministic ID (`sh_` plus 32 hex chars) from `hashElementId()` in `src/lib/types/ui-map.ts`, hashed over `(orgId, filePath, nodeDescriptor)` with the global Web Crypto API. That choice is load-bearing: the identical function runs unmodified in Node build tooling, in edge runtimes, and in the customer's browser. The file documents the invariant explicitly, because any drift between those three consumers degrades the system silently rather than failing loudly.
 
 ### Pillar 2: the browser SDK
 
-`src/sdk/` is eight files, roughly 1,640 lines, zero runtime dependencies, bundled by esbuild into an IIFE at `public/sdk.min.js` (25,282 bytes; the unminified `sdk.js` is 33,231).
+`src/sdk/` is eight files, roughly 1,640 lines, zero runtime dependencies, bundled by esbuild into an IIFE at `public/sdk.min.js` (25,277 bytes; the unminified `sdk.js` is 44,454).
 
 ```html
 <script src="https://your-deployment/sdk.min.js"></script>
@@ -85,7 +85,7 @@ Every extracted element gets a deterministic ID (`sh_` plus 32 hex chars) from `
 </script>
 ```
 
-There is also a one-line auto-init form: a `<script>` tag carrying `data-org-id` is picked up by `readAutoInitOptions()` (`src/sdk/index.ts:547`), so no second script block is needed.
+There is also a one-line auto-init form: a `<script>` tag carrying `data-org-id` is picked up by `readAutoInitOptions()` (`src/sdk/index.ts:563`), so no second script block is needed.
 
 It captures 15 event types (click, input change, submit, navigation, hover, scroll, dwell, paste, copy, focus, blur, keydown, JS error, validation error, custom), buffers to survive offline, and supports uniform, per-type, and predicate-based sampling.
 
@@ -116,7 +116,7 @@ Honest wrinkle: **the SDK emits 15 event types; the Prisma `EventType` enum pers
 
 Detection thresholds are not constants. A nightly cron computes p95 click-rate, dwell, and hover baselines per element, and the detector consumes them, so a noisy game button gets a higher rage-click threshold than a Delete button.
 
-`src/lib/interventions/dispatcher.ts` (523 lines) picks what to show. It runs an epsilon-greedy multi-armed bandit (epsilon 0.1) over copy variants, weighted by empirical success rate with Laplace smoothing. `pickVariantDeterministic` takes over in two cases: below `banditMinSamples` (30) total impressions, and whenever the stats map is absent entirely. That guarantees both early exploration and reproducible unit tests. The RNG is injectable. The dispatcher honors a per-route denylist and per-intervention pause flags, and prefers LLM-precomputed copy from an `InterventionCache` over the 42 in-code templates in `library.ts`, but only for the eight allowlisted renderer types in `VALID_RENDERER_TYPES` (`OVERLAY`, `HIGHLIGHT`, `TOOLTIP`, `MODAL`, `BANNER`, `INLINE_HINT`, `CONFIRM`, `ANNOUNCE`). Invasive types are never served from cache and are permanently allowlist-gated.
+`src/lib/interventions/dispatcher.ts` (523 lines) picks what to show. It runs an epsilon-greedy multi-armed bandit (epsilon 0.1) over copy variants, weighted by empirical success rate with Laplace smoothing. `pickVariantDeterministic` takes over in two cases: below `banditMinSamples` (30) total impressions, and whenever the stats map is absent entirely. That guarantees both early exploration and reproducible unit tests. The RNG is injectable. The dispatcher honors a per-route denylist and per-intervention pause flags, and prefers LLM-precomputed copy from an `InterventionCache` over the 42 in-code templates in `library.ts`. The allowlist that makes this safe is enforced upstream, at cache-write time: the precompute worker only ever writes cache rows for the eight types in `VALID_RENDERER_TYPES` (`src/lib/interventions/precompute.ts:159`) - `OVERLAY`, `HIGHLIGHT`, `TOOLTIP`, `MODAL`, `BANNER`, `INLINE_HINT`, `CONFIRM`, `ANNOUNCE` - so invasive types can never be served from cache.
 
 The loop closes: the SDK reports shown, dismissed, and success back as `CUSTOM` events carrying the intervention row ID, which increments counters, recomputes `successRate`, writes a per-session impression row, and feeds the bandit's next pick.
 
@@ -175,7 +175,7 @@ For a step-by-step walkthrough written for someone who has never set up a JavaSc
 
 Deployment target is Vercel. `vercel.json` declares three cron workers: `detect-struggles` every 5 minutes, `compute-baselines` daily at 04:00 UTC, `precompute-interventions` hourly. All three are gated behind `CRON_SECRET`.
 
-**Dependency caveats worth knowing before you install.** `playwright` is a full runtime dependency, not a devDependency, because the SPA crawler needs it; on a serverless target that is real weight. `react` and `react-dom` are pinned to `19.0.0-rc.*` and `next-auth` to `5.0.0-beta.25`, so two prerelease pins sit in the critical path.
+**Dependency caveats worth knowing before you install.** `playwright` is a full runtime dependency, not a devDependency, because the SPA crawler needs it; on a serverless target that is real weight. `next-auth` is pinned to the prerelease `5.0.0-beta.25`, so one prerelease pin sits in the critical path; `react` and `react-dom` carry caret ranges seeded from a `19.0.0` RC that the committed `pnpm-lock.yaml` now resolves to stable `19.2.x`.
 
 ## Project layout
 
@@ -204,7 +204,7 @@ scripts/               setup.sh, setup.ps1
 public/                sdk.js, sdk.min.js (checked-in esbuild output), demo/
 ```
 
-20,492 lines of TypeScript and TSX across 115 files in `src/` and `tests/`. Dashboard reads go through server components and mutations through inline server actions; there is deliberately no REST layer for the dashboard, only for SDK ingest and webhooks.
+20,493 lines of TypeScript and TSX across 115 files in `src/` and `tests/`. Dashboard reads go through server components and mutations through inline server actions; there is deliberately no REST layer for the dashboard, only for SDK ingest and webhooks.
 
 The four migration directory names read as the project's phase history: `init`, `expand_enums`, `platform_config_allowlists`, `phase_25_events_and_sampling`.
 
@@ -256,9 +256,9 @@ CI (`.github/workflows/ci.yml`) runs on push to main and on every PR: Node 22 an
 
 ## About this public copy
 
-This repository is a sanitized copy of a private working tree. The `.env` file, which held live working credentials (SMTP password, GitHub App client and webhook secrets, the AES-GCM master key, the Auth.js session secret, the cron secret, and a personal tunnel hostname), was excluded. `.env.example` is the complete, all-blank template and is what you should copy. Machine-local build state (`node_modules/`, `.next/`, `tsconfig.tsbuildinfo`, `next-env.d.ts`) and an internal agent session journal containing local absolute paths were also removed. Nothing removed affects your ability to run the project.
+This repository is a sanitized copy of a private working tree. The `.env` file, which held live working credentials (SMTP password, GitHub App client and webhook secrets, the AES-GCM master key, the Auth.js session secret, the cron secret, and a personal tunnel hostname), was excluded. `.env.example` is the complete template, carrying placeholder values rather than real ones, and is what you should copy. Machine-local build state (`node_modules/`, `.next/`, `tsconfig.tsbuildinfo`, `next-env.d.ts`) and an internal agent session journal containing local absolute paths were also removed. Nothing removed affects your ability to run the project.
 
-`public/sdk.js` and `public/sdk.min.js` are checked-in esbuild output of this repo's own `src/sdk/` sources, kept deliberately so `public/demo/index.html` works out of the box; regenerate them with `pnpm sdk:build:min`.
+`public/sdk.js` and `public/sdk.min.js` are checked-in esbuild output of this repo's own `src/sdk/` sources, kept deliberately so `public/demo/index.html` works out of the box; regenerate them with `pnpm sdk:build` and `pnpm sdk:build:min`.
 
 The UI primitives in `src/components/ui/` were hand-written in the shadcn/ui style rather than pulled from its CLI. shadcn/ui is MIT and explicitly meant to be copied into your codebase; the attribution is noted here regardless.
 
