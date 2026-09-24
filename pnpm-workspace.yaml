@@ -5,3 +5,12 @@ overrides:
   # fixed in 8.5.23+. Raise only the copy next resolves; 8.5.x is
   # backward compatible within postcss 8.
   next>postcss: ^8.5.28
+peerDependencyRules:
+  allowedVersions:
+    # next-auth 5.0.0-beta.32 (and its @auth/core) still declare nodemailer
+    # ^7.0.7 || ^8.0.5, but the advisory fixes start at 9.1.1. The email
+    # provider only calls createTransport and sendMail, which 9 and 10 kept
+    # (their breaking changes: TLS checks when fetching remote attachments,
+    # Node 20+). tests/email-sign-in.test.ts sends a real sign-in email
+    # through the installed version. Remove once next-auth allows 10.
+    nodemailer: '10'
