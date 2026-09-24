@@ -1,2 +1,7 @@
 allowBuilds:
   esbuild: false
+overrides:
+  # next pins postcss to exactly 8.4.31, which carries GHSA advisories
+  # fixed in 8.5.23+. Raise only the copy next resolves; 8.5.x is
+  # backward compatible within postcss 8.
+  next>postcss: ^8.5.28
