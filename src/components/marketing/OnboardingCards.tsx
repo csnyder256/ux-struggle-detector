@@ -1,5 +1,6 @@
 import Link from 'next/link'
-import { ArrowRight, Github, Globe, KeyRound, Zap } from 'lucide-react'
+import { ArrowRight, Globe, KeyRound, Zap } from 'lucide-react'
+import { GithubMark } from '@/components/icons/GithubMark'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -7,7 +8,7 @@ import { cn } from '@/lib/utils'
 const PATHS = [
   {
     href: '/onboarding/github',
-    icon: Github,
+    icon: GithubMark,
     title: 'Connect GitHub',
     description:
       'OAuth into your repo. We auto-detect your framework, parse routes, components, and handlers, and build a complete map of every interactive element.',
