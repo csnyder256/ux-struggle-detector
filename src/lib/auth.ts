@@ -9,6 +9,7 @@ import NextAuth, { type DefaultSession } from 'next-auth'
 import { PrismaAdapter } from '@auth/prisma-adapter'
 import Nodemailer from 'next-auth/providers/nodemailer'
 import { prisma } from '@/lib/db'
+import { normalizeSignInEmail } from '@/lib/auth/email'
 
 declare module 'next-auth' {
   interface Session {
@@ -34,6 +35,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         },
       },
       from: process.env.EMAIL_FROM,
+      normalizeIdentifier: normalizeSignInEmail,
     }),
   ],
   pages: {
