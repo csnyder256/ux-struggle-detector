@@ -1,3 +1,8 @@
+# Keep npm deps and CI actions patched automatically. CI (typecheck, lint,
+# tests, SDK bundle freshness, production build) gates every Dependabot PR.
+#
+# Routine updates are grouped so a normal week is one PR per ecosystem.
+# Majors still arrive one at a time because they deserve a separate read.
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -5,7 +10,19 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      # tailwind-merge 3 only understands Tailwind v4 class names. This app
+      # is on Tailwind 3, where v3 would merge some classes incorrectly.
+      # Lift this when Tailwind moves to 4.
+      - dependency-name: "tailwind-merge"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      github-actions:
+        patterns: ["*"]

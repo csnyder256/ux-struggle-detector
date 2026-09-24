@@ -21,7 +21,7 @@ export class OpenAIProvider implements ModelProvider {
   async deep(input: DeepRequest): Promise<DeepResponse> {
     const result = await this.client.chat.completions.create({
       model: input.model ?? OpenAIProvider.DEFAULT_DEEP_MODEL,
-      max_tokens: input.maxTokens ?? 8192,
+      max_completion_tokens: input.maxTokens ?? 8192,
       messages: [
         { role: 'system', content: input.systemPrompt },
         { role: 'user', content: input.userPrompt },
@@ -63,7 +63,7 @@ export class OpenAIProvider implements ModelProvider {
   async fast(input: FastRequest): Promise<FastResponse> {
     const result = await this.client.chat.completions.create({
       model: input.model ?? OpenAIProvider.DEFAULT_FAST_MODEL,
-      max_tokens: input.maxTokens ?? 512,
+      max_completion_tokens: input.maxTokens ?? 512,
       messages: [
         { role: 'system', content: input.systemPrompt },
         { role: 'user', content: input.userPrompt },
