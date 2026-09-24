@@ -214,7 +214,7 @@ The four migration directory names read as the project's phase history: `init`, 
 
 ## Testing
 
-183 tests across 11 Vitest files.
+184 tests across 12 Vitest files.
 
 | File | Tests | Covers |
 | --- | --- | --- |
@@ -229,6 +229,7 @@ The four migration directory names read as the project's phase history: `init`, 
 | `crypto.test.ts` | 6 | AES-GCM round trip and tamper detection |
 | `dispatcher-denylist.test.ts` | 5 | route denylist |
 | `email-sign-in.test.ts` | 4 | magic-link delivery over SMTP, sign-in address rules |
+| `session-payload.test.ts` | 1 | `/api/auth/session` never exposes the session token |
 
 Coverage is concentrated on the pure, high-risk core: detection rules, dispatcher selection, both parser families, the crypto boundary, and the ElementId hash contract. Those are the components where a silent regression would degrade the product invisibly instead of breaking loudly.
 
