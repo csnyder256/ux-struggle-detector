@@ -6,9 +6,9 @@
 ![TypeScript](https://img.shields.io/badge/typescript-5.6%20strict-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![Next.js](https://img.shields.io/badge/next.js-15%20app%20router-000000?style=flat-square&logo=nextdotjs&logoColor=white)
 ![Prisma](https://img.shields.io/badge/prisma-5%20%2F%20postgres-2D3748?style=flat-square&logo=prisma&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-165%20across%2010%20files-brightgreen?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-178%20across%2010%20files-brightgreen?style=flat-square)
 ![Detection rules](https://img.shields.io/badge/struggle%20rules-40-orange?style=flat-square)
-![SDK](https://img.shields.io/badge/browser%20SDK-25%20KB%20minified-informational?style=flat-square)
+![SDK](https://img.shields.io/badge/browser%20SDK-26%20KB%20minified-informational?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 
 Built under the product name **Clarus Heal**. It maps a customer's web app UI, either by reading their GitHub repo or by crawling their live site, then watches real users through a drop-in script tag. Struggle detection runs server-side against 40 named rules, and any intervention it decides to show comes back in the same HTTP response the events arrived in. The customer never edits their application code to add a hint. A PII scrubber runs in the browser before anything is sent.
@@ -16,7 +16,7 @@ Built under the product name **Clarus Heal**. It maps a customer's web app UI, e
 Three pillars:
 
 1. **Map the UI first.** Framework detection across 46 registry entries in 22 families, a Babel AST parser for React and Preact, a universal template scanner for everything else, plus an LLM pass that gives each element a semantic name and intent.
-2. **Watch from the browser.** A dependency-free SDK (about 1,640 lines, 25 KB minified) capturing 15 event types with client-side PII masking, offline buffering, and sampling.
+2. **Watch from the browser.** A dependency-free SDK (about 1,740 lines, 26 KB minified) capturing 15 event types with client-side PII masking, offline buffering, and sampling.
 3. **Decide and intervene server-side.** 40 detection rules over hydrated session history, then a bandit-driven dispatcher that returns an overlay, tooltip, or hint inline.
 
 ---
@@ -72,7 +72,7 @@ Every extracted element gets a deterministic ID (`sh_` plus 32 hex chars) from `
 
 ### Pillar 2: the browser SDK
 
-`src/sdk/` is eight files, roughly 1,640 lines, zero runtime dependencies, bundled by esbuild into an IIFE at `public/sdk.min.js` (25,277 bytes; the unminified `sdk.js` is 44,454).
+`src/sdk/` is nine files, roughly 1,740 lines, zero runtime dependencies, bundled by esbuild into an IIFE at `public/sdk.min.js` (26,101 bytes; the unminified `sdk.js` is 46,326).
 
 ```html
 <script src="https://your-deployment/sdk.min.js"></script>
@@ -88,6 +88,8 @@ Every extracted element gets a deterministic ID (`sh_` plus 32 hex chars) from `
 There is also a one-line auto-init form: a `<script>` tag carrying `data-org-id` is picked up by `readAutoInitOptions()` (`src/sdk/index.ts:563`), so no second script block is needed.
 
 It captures 15 event types (click, input change, submit, navigation, hover, scroll, dwell, paste, copy, focus, blur, keydown, JS error, validation error, custom), buffers to survive offline, and supports uniform, per-type, and predicate-based sampling.
+
+It does not care what the host app is built with. Listeners sit at the document level, so it needs no framework hooks. Navigation is followed through `pushState`, `replaceState` (only when the route changes) and the back/forward buttons. For hash-mode routers (`#/cart`, AngularJS `#!/cart`), the route comes from the fragment, so those screens are not all reported as `/`. Where the browser has the Navigation API, a forward move to a new fragment is kept apart from a real back-button press, so clicking through hash links never reads as back-button thrash. Calling `initSelfHealing()` during a server render is a no-op, so frameworks that render on the server can call it from shared code.
 
 Honest wrinkle: **the SDK emits 15 event types; the Prisma `EventType` enum persists 7.** The extra types are collapsed at the persistence boundary today.
 
@@ -196,7 +198,7 @@ src/
     enrichment/        LLM passes over elements and routes
     providers/         ModelProvider interface + anthropic / openai
     crypto/ auth/ usage/ github/ db/ access.ts
-  sdk/                 dependency-free browser SDK (8 files, ~1,640 LOC)
+  sdk/                 dependency-free browser SDK (9 files, ~1,740 LOC)
   components/          hand-written shadcn-style primitives (no Radix dependency)
 prisma/                schema.prisma, 4 applied migrations
 tests/                 10 Vitest files, 165 tests
