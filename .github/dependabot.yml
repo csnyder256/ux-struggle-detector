@@ -23,17 +23,19 @@ updates:
     ignore:
       # Next 16 removes `next lint`, so lint has to move to the ESLint CLI
       # with a flat config first. ESLint 10 and eslint-config-next 16 only
-      # work after that move. next-auth 5.0.0-beta.25 also peers on
-      # next ^14 || ^15.
+      # work after that move. (next-auth 5.0.0-beta.32 already accepts
+      # next ^16.)
       - dependency-name: "next"
         update-types: ["version-update:semver-major"]
       - dependency-name: "eslint-config-next"
         update-types: ["version-update:semver-major"]
       - dependency-name: "eslint"
         update-types: ["version-update:semver-major"]
-      # next-auth peers on nodemailer ^6.6.5 for the email sign-in provider.
-      # Nothing in CI sends mail, so a major here would pass and still be
-      # untested. Move it with next-auth.
+      # next-auth 5.0.0-beta.32 peers on nodemailer ^7.0.7 || ^8.0.5 for the
+      # email sign-in provider, and nothing in CI sends mail, so a major here
+      # would pass while the provider stays untested. Move to nodemailer 9+
+      # (which carries the remaining advisory fixes, >= 9.1.1) once
+      # next-auth's peer range allows it.
       - dependency-name: "nodemailer"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@types/nodemailer"
