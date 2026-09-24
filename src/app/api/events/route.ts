@@ -18,96 +18,20 @@
  */
 
 import { NextResponse, type NextRequest } from 'next/server'
-import { z } from 'zod'
 import { prisma } from '@/lib/db'
 import {
   ALL_STRUGGLE_TYPES,
-  EVENT_SCHEMA_VERSION,
-  MAX_ROUTE_LENGTH,
   type EventBatchResponse,
   type RuntimeEvent,
   type StruggleType,
 } from '@/lib/types/events'
+import { BatchSchema } from '@/lib/ingest/schema'
 import { detectStruggles } from '@/lib/struggle/detect'
 import { dispatchInterventionsWithRows } from '@/lib/interventions/dispatcher'
 import { ingestKeyRequired, resolveIngestToken } from '@/lib/auth/ingest'
 import { bumpUsage, trackActiveUsers } from '@/lib/usage/track'
 
 const STRUGGLE_TYPE_SET = new Set<string>(ALL_STRUGGLE_TYPES)
-
-const PageContextSchema = z
-  .object({
-    title: z.string().max(500).optional(),
-    h1: z.string().max(500).optional(),
-    viewportW: z.number().int().nonnegative().optional(),
-    viewportH: z.number().int().nonnegative().optional(),
-    formFactor: z.enum(['mobile', 'tablet', 'desktop']).optional(),
-    referrer: z.string().max(2048).optional(),
-    ageMs: z.number().int().nonnegative().optional(),
-  })
-  .passthrough()
-  .optional()
-
-const ElementContextSchema = z
-  .object({
-    label: z.string().max(500).optional(),
-    role: z.string().max(40).optional(),
-    formId: z.string().max(120).optional(),
-    formValid: z.boolean().optional(),
-    touched: z.boolean().optional(),
-    dirty: z.boolean().optional(),
-    valueLength: z.number().int().nonnegative().optional(),
-    validity: z.string().max(200).optional(),
-    disabled: z.boolean().optional(),
-    dead: z.boolean().optional(),
-  })
-  .passthrough()
-  .optional()
-
-const SCHEMA_VERSION_LITERAL = z.union([
-  z.literal(1),
-  z.literal(2),
-  z.literal(EVENT_SCHEMA_VERSION),
-])
-
-const RuntimeEventSchema = z.object({
-  schemaVersion: SCHEMA_VERSION_LITERAL,
-  idempotencyKey: z.string().min(1).max(128),
-  sessionId: z.string().min(1).max(128),
-  userIdHash: z.string().nullable(),
-  elementId: z
-    .string()
-    .regex(/^sh_[0-9a-f]{32}$/)
-    .nullable(),
-  route: z.string().min(1).max(MAX_ROUTE_LENGTH),
-  eventType: z.enum([
-    'CLICK',
-    'INPUT_CHANGE',
-    'SUBMIT',
-    'NAVIGATION',
-    'HOVER',
-    'SCROLL',
-    'DWELL',
-    'PASTE',
-    'COPY',
-    'FOCUS',
-    'BLUR',
-    'KEY_DOWN',
-    'JS_ERROR',
-    'VALIDATION_ERROR',
-    'CUSTOM',
-  ]),
-  ts: z.string().datetime(),
-  meta: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
-  page: PageContextSchema,
-  element: ElementContextSchema,
-})
-
-const BatchSchema = z.object({
-  schemaVersion: SCHEMA_VERSION_LITERAL,
-  clockOffsetMs: z.number(),
-  events: z.array(RuntimeEventSchema).max(500),
-})
 
 // Event types that have first-class storage in the DB enum. HOVER + DWELL
 // went in for Phase 25 so the per-element baselines worker has real signal
