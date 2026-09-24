@@ -54,3 +54,14 @@ jobs:
 
       - name: Fail if the checked-in SDK bundles are stale
         run: git diff --exit-code -- public/sdk.js public/sdk.min.js
+
+      # Typecheck and unit tests do not load every module the way the
+      # production bundle does. A dependency that breaks at bundle time
+      # (ESM-only majors, removed exports) only shows up here. The values are
+      # placeholders: the build connects to nothing.
+      - name: Production build
+        env:
+          DATABASE_URL: postgresql://build:build@localhost:5432/build
+          AUTH_SECRET: build-only-placeholder
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: pnpm build
