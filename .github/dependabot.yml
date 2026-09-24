@@ -2,7 +2,9 @@
 # tests, SDK bundle freshness, production build) gates every Dependabot PR.
 #
 # Routine updates are grouped so a normal week is one PR per ecosystem.
-# Majors still arrive one at a time because they deserve a separate read.
+# Majors arrive one at a time, except the ones below that are migrations
+# rather than bumps. Each ignore names what has to happen first; delete the
+# entry when that migration lands and Dependabot resumes normally.
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -13,16 +15,58 @@ updates:
     groups:
       # @babel/parser, /types and /traverse must resolve to one @babel/types,
       # or parse results stop type-checking against the traverse types (seen
-      # when the parser moved alone). Move them together, majors included.
+      # when the parser moved alone). Move them together.
       babel:
         patterns: ["@babel/*"]
       npm-minor-and-patch:
         update-types: ["minor", "patch"]
     ignore:
-      # tailwind-merge 3 only understands Tailwind v4 class names. This app
-      # is on Tailwind 3, where v3 would merge some classes incorrectly.
-      # Lift this when Tailwind moves to 4.
+      # Next 16 removes `next lint`, so lint has to move to the ESLint CLI
+      # with a flat config first. ESLint 10 and eslint-config-next 16 only
+      # work after that move. next-auth 5.0.0-beta.25 also peers on
+      # next ^14 || ^15.
+      - dependency-name: "next"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "eslint-config-next"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      # next-auth peers on nodemailer ^6.6.5 for the email sign-in provider.
+      # Nothing in CI sends mail, so a major here would pass and still be
+      # untested. Move it with next-auth.
+      - dependency-name: "nodemailer"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/nodemailer"
+        update-types: ["version-update:semver-major"]
+      # Prisma 7 moves the datasource URL out of schema.prisma into
+      # prisma.config.ts and requires a driver adapter; client and CLI move
+      # together in that change.
+      - dependency-name: "prisma"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@prisma/client"
+        update-types: ["version-update:semver-major"]
+      # Tailwind 4 moves configuration into CSS. tailwind-merge 3 only
+      # understands v4 class names, so on Tailwind 3 it would merge some
+      # classes incorrectly. Both move in the Tailwind 4 migration.
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
       - dependency-name: "tailwind-merge"
+        update-types: ["version-update:semver-major"]
+      # TypeScript 7 removes `baseUrl` (used by tsconfig.json) and fails
+      # `next build` on Next 15. Revisit with the Next 16 migration.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # Babel 8 changes the AST and ships ESM-only; src/lib/parsers/react.ts
+      # is written against Babel 7.
+      - dependency-name: "@babel/*"
+        update-types: ["version-update:semver-major"]
+      # zod validates the SDK wire schema on the ingest hot path; v4 changes
+      # parsing and error behaviour that tests only partly cover.
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      # Types track the Node line CI runs (22), not the newest release;
+      # newer types would type-check APIs the supported runtimes lack.
+      - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
   - package-ecosystem: "github-actions"
     directory: "/"
