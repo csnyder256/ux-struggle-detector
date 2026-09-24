@@ -6,7 +6,7 @@
 ![TypeScript](https://img.shields.io/badge/typescript-5.6%20strict-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![Next.js](https://img.shields.io/badge/next.js-15%20app%20router-000000?style=flat-square&logo=nextdotjs&logoColor=white)
 ![Prisma](https://img.shields.io/badge/prisma-5%20%2F%20postgres-2D3748?style=flat-square&logo=prisma&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-178%20across%2010%20files-brightgreen?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-179%20across%2010%20files-brightgreen?style=flat-square)
 ![Detection rules](https://img.shields.io/badge/struggle%20rules-40-orange?style=flat-square)
 ![SDK](https://img.shields.io/badge/browser%20SDK-26%20KB%20minified-informational?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
@@ -72,7 +72,7 @@ Every extracted element gets a deterministic ID (`sh_` plus 32 hex chars) from `
 
 ### Pillar 2: the browser SDK
 
-`src/sdk/` is nine files, roughly 1,740 lines, zero runtime dependencies, bundled by esbuild into an IIFE at `public/sdk.min.js` (26,101 bytes; the unminified `sdk.js` is 46,326).
+`src/sdk/` is nine files, roughly 1,740 lines, zero runtime dependencies, bundled by esbuild into an IIFE at `public/sdk.min.js` (26,166 bytes; the unminified `sdk.js` is 46,488).
 
 ```html
 <script src="https://your-deployment/sdk.min.js"></script>

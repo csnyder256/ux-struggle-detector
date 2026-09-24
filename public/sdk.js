@@ -32,6 +32,7 @@ var ClarusHeal = (() => {
 
   // src/lib/types/events.ts
   var EVENT_SCHEMA_VERSION = 3;
+  var MAX_ROUTE_LENGTH = 2048;
   var DEFAULT_STRUGGLE_RULES = {
     rageClick: { minClicks: 3, windowMs: 2e3 },
     deadClick: {
@@ -129,10 +130,13 @@ var ClarusHeal = (() => {
   function routeFromLocation(loc) {
     const hash = loc.hash;
     const hashRoute = hash.startsWith("#!/") ? hash.slice(2) : hash.startsWith("#/") ? hash.slice(1) : null;
-    if (hashRoute === null) return loc.pathname || "/";
+    if (hashRoute === null) return clamp(loc.pathname || "/");
     const end = hashRoute.search(/[?#]/);
     const route = end === -1 ? hashRoute : hashRoute.slice(0, end);
-    return route || "/";
+    return clamp(route || "/");
+  }
+  function clamp(route) {
+    return route.length > MAX_ROUTE_LENGTH ? route.slice(0, MAX_ROUTE_LENGTH) : route;
   }
   var NavigationTracker = class {
     constructor(initial) {
