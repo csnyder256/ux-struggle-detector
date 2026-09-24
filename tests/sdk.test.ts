@@ -4,6 +4,7 @@ import { RageClickDetector } from '@/sdk/struggle-detector'
 import type { ElementId } from '@/lib/types/ui-map'
 import { initSelfHealing, readAutoInitOptions } from '@/sdk'
 import { NavigationTracker, classifyPopstate, routeFromLocation } from '@/sdk/route'
+import { MAX_ROUTE_LENGTH } from '@/lib/types/events'
 
 describe('scrubText', () => {
   it('redacts emails', () => {
@@ -243,6 +244,15 @@ describe('routeFromLocation', () => {
 
   it('treats an in-page anchor as the same route', () => {
     expect(routeFromLocation({ pathname: '/pricing', hash: '#faq' })).toBe('/pricing')
+  })
+
+  it('never returns a route the ingest schema would reject', () => {
+    // The server validates a batch as a whole; one oversized route would
+    // drop every event in the flush.
+    const long = 'a'.repeat(MAX_ROUTE_LENGTH + 500)
+    expect(routeFromLocation({ pathname: '/', hash: `#/${long}` })).toHaveLength(MAX_ROUTE_LENGTH)
+    expect(routeFromLocation({ pathname: `/${long}`, hash: '' })).toHaveLength(MAX_ROUTE_LENGTH)
+    expect(routeFromLocation({ pathname: '/short', hash: '' })).toBe('/short')
   })
 
   it('never returns an empty route', () => {

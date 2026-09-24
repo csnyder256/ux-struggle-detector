@@ -13,6 +13,8 @@
  * `#!/...`). An in-page anchor such as `#pricing` is not a navigation.
  */
 
+import { MAX_ROUTE_LENGTH } from '../lib/types/events'
+
 export interface LocationLike {
   pathname: string
   search: string
@@ -22,10 +24,14 @@ export interface LocationLike {
 export function routeFromLocation(loc: Pick<LocationLike, 'pathname' | 'hash'>): string {
   const hash = loc.hash
   const hashRoute = hash.startsWith('#!/') ? hash.slice(2) : hash.startsWith('#/') ? hash.slice(1) : null
-  if (hashRoute === null) return loc.pathname || '/'
+  if (hashRoute === null) return clamp(loc.pathname || '/')
   const end = hashRoute.search(/[?#]/)
   const route = end === -1 ? hashRoute : hashRoute.slice(0, end)
-  return route || '/'
+  return clamp(route || '/')
+}
+
+function clamp(route: string): string {
+  return route.length > MAX_ROUTE_LENGTH ? route.slice(0, MAX_ROUTE_LENGTH) : route
 }
 
 /**

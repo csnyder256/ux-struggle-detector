@@ -23,6 +23,7 @@ import { prisma } from '@/lib/db'
 import {
   ALL_STRUGGLE_TYPES,
   EVENT_SCHEMA_VERSION,
+  MAX_ROUTE_LENGTH,
   type EventBatchResponse,
   type RuntimeEvent,
   type StruggleType,
@@ -78,7 +79,7 @@ const RuntimeEventSchema = z.object({
     .string()
     .regex(/^sh_[0-9a-f]{32}$/)
     .nullable(),
-  route: z.string().min(1).max(2048),
+  route: z.string().min(1).max(MAX_ROUTE_LENGTH),
   eventType: z.enum([
     'CLICK',
     'INPUT_CHANGE',

@@ -7,6 +7,13 @@ import type { ElementId } from './ui-map'
 
 export const EVENT_SCHEMA_VERSION = 3 as const
 
+/**
+ * Longest `route` the ingest schema accepts. The SDK clamps to it: the server
+ * validates a batch as a whole, so one oversized route (a hash-routed app
+ * with a long path in its fragment) would reject every event in the flush.
+ */
+export const MAX_ROUTE_LENGTH = 2048
+
 export type EventType =
   | 'CLICK'
   | 'INPUT_CHANGE'
