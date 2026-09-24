@@ -11,6 +11,11 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     groups:
+      # @babel/parser, /types and /traverse must resolve to one @babel/types,
+      # or parse results stop type-checking against the traverse types (seen
+      # when the parser moved alone). Move them together, majors included.
+      babel:
+        patterns: ["@babel/*"]
       npm-minor-and-patch:
         update-types: ["minor", "patch"]
     ignore:
