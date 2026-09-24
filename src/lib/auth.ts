@@ -62,18 +62,23 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
   },
   callbacks: {
+    // With database sessions, Auth.js passes this callback the stored session
+    // row (sessionToken included) and the full user row, and serves whatever
+    // it returns as JSON from /api/auth/session. Returning `session` itself
+    // handed the session token, the secret the HttpOnly cookie protects, to
+    // any script on the page. Build the payload field by field instead.
     async session({ session, user }) {
       const membership = await prisma.membership.findFirst({
         where: { userId: user.id },
         select: { orgId: true, role: true },
         orderBy: { createdAt: 'asc' },
       })
-      if (membership) {
-        session.orgId = membership.orgId
-        session.role = membership.role
+      return {
+        expires: session.expires,
+        user: { id: user.id, name: user.name, email: user.email, image: user.image },
+        orgId: membership?.orgId,
+        role: membership?.role,
       }
-      session.user.id = user.id
-      return session
     },
   },
 })
