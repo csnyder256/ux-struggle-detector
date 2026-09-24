@@ -214,13 +214,13 @@ The four migration directory names read as the project's phase history: `init`, 
 
 ## Testing
 
-165 tests across 10 Vitest files.
+183 tests across 11 Vitest files.
 
 | File | Tests | Covers |
 | --- | --- | --- |
+| `sdk.test.ts` | 45 | PII scrubbing, buffering, sampling, route tracking |
 | `dispatcher.test.ts` | 40 | variant selection, bandit behavior, copy substitution |
 | `struggle.test.ts` | 33 | detection rules |
-| `sdk.test.ts` | 31 | PII scrubbing, buffering, sampling |
 | `react-parser.test.ts` | 12 | Babel JSX extraction |
 | `crawler.test.ts` | 11 | HTML crawl |
 | `ui-map.test.ts` | 11 | ElementId determinism |
@@ -228,12 +228,13 @@ The four migration directory names read as the project's phase history: `init`, 
 | `playwright-crawler.test.ts` | 6 | SPA crawl |
 | `crypto.test.ts` | 6 | AES-GCM round trip and tamper detection |
 | `dispatcher-denylist.test.ts` | 5 | route denylist |
+| `email-sign-in.test.ts` | 4 | magic-link delivery over SMTP, sign-in address rules |
 
 Coverage is concentrated on the pure, high-risk core: detection rules, dispatcher selection, both parser families, the crypto boundary, and the ElementId hash contract. Those are the components where a silent regression would degrade the product invisibly instead of breaking loudly.
 
 **What is not covered:** there is no integration test that exercises `/api/events` end to end against a real database, there are no browser or E2E tests (Playwright is a crawling dependency here, not a test runner), and the dashboard's React pages are untested.
 
-CI (`.github/workflows/ci.yml`) runs on push to main and on every PR: Node 22 and pnpm 10 with a cached store, then `prisma generate`, `typecheck`, `lint`, `test`, `sdk:build:min`. CI does not run `pnpm build`, and there is no Postgres service container, which is consistent with the suite being unit-level only.
+CI (`.github/workflows/ci.yml`) runs on push to main and on every PR: Node 22 and pnpm 10 with a cached store, then `prisma generate`, `typecheck`, `lint`, `test`, both SDK bundles (failing if the checked-in copies are stale), and a production `pnpm build`. There is no Postgres service container, which is consistent with the suite being unit-level only.
 
 ## Status
 

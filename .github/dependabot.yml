@@ -31,15 +31,6 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "eslint"
         update-types: ["version-update:semver-major"]
-      # next-auth 5.0.0-beta.32 peers on nodemailer ^7.0.7 || ^8.0.5 for the
-      # email sign-in provider, and nothing in CI sends mail, so a major here
-      # would pass while the provider stays untested. Move to nodemailer 9+
-      # (which carries the remaining advisory fixes, >= 9.1.1) once
-      # next-auth's peer range allows it.
-      - dependency-name: "nodemailer"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@types/nodemailer"
-        update-types: ["version-update:semver-major"]
       # Prisma 7 moves the datasource URL out of schema.prisma into
       # prisma.config.ts and requires a driver adapter; client and CLI move
       # together in that change.
