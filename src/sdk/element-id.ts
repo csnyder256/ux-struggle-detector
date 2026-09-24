@@ -13,6 +13,7 @@
  */
 
 import { hashElementId, type ElementId, isElementId } from '../lib/types/ui-map'
+import { routeFromLocation } from './route'
 
 const MAX_DEPTH = 20
 
@@ -47,7 +48,9 @@ export async function resolveElementId(
   const attr = el.getAttribute('data-sh-id')
   if (attr && isElementId(attr)) return attr
 
-  const filePath = window.location.pathname
+  // Route, not pathname: in a hash-routed app every screen shares one
+  // pathname, and same-position elements on different screens would collide.
+  const filePath = routeFromLocation(window.location)
   const nodeDescriptor = describeNode(el)
   return hashElementId({ orgId, filePath, nodeDescriptor })
 }

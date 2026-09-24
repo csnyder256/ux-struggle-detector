@@ -1,12 +1,13 @@
 /**
  * Clarus Heal - runtime SDK.
  *
- * Customer integration is one line:
- *   import { initSelfHealing } from 'clarus-heal'
- *   initSelfHealing({ orgId: '...', endpoint: '/api/events' })
+ * Customer integration is one script tag carrying `data-org-id` (see
+ * readAutoInitOptions below), or, after loading the bundle (public/sdk.min.js):
+ *   ClarusHeal.initSelfHealing({ orgId: '...', endpoint: 'https://.../api/events' })
  *
- * The bundled IIFE form (public/sdk.min.js) exposes this as
- * `window.ClarusHeal.initSelfHealing` for script-tag installs.
+ * It is framework-agnostic: it listens at the document level, follows
+ * history-mode and hash-mode routers (see ./route), and is a no-op when
+ * called during server-side rendering.
  *
  * Captures: click, submit, input, paste, copy, focus, blur, key down, hover,
  * scroll, dwell, navigation, JS errors, and "validation_error" custom events.
@@ -29,6 +30,7 @@ import { EventBuffer } from './event-buffer'
 import { Transport } from './transport'
 import { RageClickDetector } from './struggle-detector'
 import { renderIntervention, setOutcomeCallback } from './renderers'
+import { NavigationTracker, classifyPopstate, routeFromLocation, type NavigationTrigger } from './route'
 
 export interface InitOptions {
   orgId: string
@@ -119,6 +121,11 @@ async function hashUserIdentifier(userId: string): Promise<string> {
 }
 
 export function initSelfHealing(opts: InitOptions): void {
+  // Frameworks that render on the server (Next, Nuxt, SvelteKit, Remix,
+  // Angular SSR) may run this during the server pass. There is nothing to
+  // observe there, and marking the SDK initialized would be wrong in any
+  // runtime that shares module state with the client, so bail out first.
+  if (typeof window === 'undefined' || typeof document === 'undefined') return
   if (initialized) return
   initialized = true
   try {
@@ -288,7 +295,7 @@ function initInner(opts: InitOptions): void {
       sessionId,
       userIdHash,
       elementId,
-      route: location.pathname,
+      route: routeFromLocation(location),
       eventType,
       ts: new Date().toISOString(),
       meta,
@@ -502,17 +509,39 @@ function initInner(opts: InitOptions): void {
   })
 
   // ── Navigation ───────────────────────────────────────────────────────────
+  const navigation = new NavigationTracker(location)
+  function navigated(trigger: NavigationTrigger): void {
+    if (navigation.shouldRecord(trigger, location)) void emit('NAVIGATION', null, { trigger })
+  }
   void emit('NAVIGATION', null, { trigger: 'initial' })
+  // The Navigation API (where present) fires `navigate` before `popstate`
+  // and says whether the move was a traversal or a new entry.
+  let lastNavigationType: string | null = null
+  const navigationApi = (window as { navigation?: EventTarget }).navigation
+  navigationApi?.addEventListener('navigate', ((e: Event & { navigationType?: string }) => {
+    lastNavigationType = e.navigationType ?? null
+  }) as EventListener)
   window.addEventListener('popstate', () => {
-    void emit('NAVIGATION', null, { trigger: 'popstate' })
+    const trigger = classifyPopstate(lastNavigationType)
+    lastNavigationType = null
+    navigated(trigger)
   })
+  // Hash-mode routers move by changing the fragment.
+  window.addEventListener('hashchange', () => navigated('hashchange'))
 
-  // SPA pushState / replaceState patches.
+  // SPA pushState / replaceState patches. Some routers navigate with
+  // replaceState (redirects, `replace: true` links); NavigationTracker
+  // ignores the many replaceState calls that do not change the URL.
   const _pushState = history.pushState.bind(history)
   history.pushState = function (data: unknown, unused: string, url?: string | URL | null) {
     _pushState(data, unused, url)
-    void emit('NAVIGATION', null, { trigger: 'pushstate' })
+    navigated('pushstate')
   } as typeof history.pushState
+  const _replaceState = history.replaceState.bind(history)
+  history.replaceState = function (data: unknown, unused: string, url?: string | URL | null) {
+    _replaceState(data, unused, url)
+    navigated('replacestate')
+  } as typeof history.replaceState
 
   // Expose emit + identity setter to the module-level handle so the public
   // track() / identify() APIs route through the same buffer.

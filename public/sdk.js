@@ -125,6 +125,32 @@ var ClarusHeal = (() => {
     return /^sh_[0-9a-f]{32}$/.test(value);
   }
 
+  // src/sdk/route.ts
+  function routeFromLocation(loc) {
+    const hash = loc.hash;
+    const hashRoute = hash.startsWith("#!/") ? hash.slice(2) : hash.startsWith("#/") ? hash.slice(1) : null;
+    if (hashRoute === null) return loc.pathname || "/";
+    const end = hashRoute.search(/[?#]/);
+    const route = end === -1 ? hashRoute : hashRoute.slice(0, end);
+    return route || "/";
+  }
+  var NavigationTracker = class {
+    constructor(initial) {
+      __publicField(this, "lastRoute");
+      this.lastRoute = routeFromLocation(initial);
+    }
+    shouldRecord(trigger, loc) {
+      const route = routeFromLocation(loc);
+      const changed = route !== this.lastRoute;
+      this.lastRoute = route;
+      if (trigger === "replacestate" || trigger === "hashchange") return changed;
+      return true;
+    }
+  };
+  function classifyPopstate(lastNavigationType) {
+    return lastNavigationType === "push" || lastNavigationType === "replace" ? "hashchange" : "popstate";
+  }
+
   // src/sdk/element-id.ts
   var MAX_DEPTH = 20;
   function describeNode(el) {
@@ -149,7 +175,7 @@ var ClarusHeal = (() => {
   async function resolveElementId(orgId, el) {
     const attr = el.getAttribute("data-sh-id");
     if (attr && isElementId(attr)) return attr;
-    const filePath = window.location.pathname;
+    const filePath = routeFromLocation(window.location);
     const nodeDescriptor = describeNode(el);
     return hashElementId({ orgId, filePath, nodeDescriptor });
   }
@@ -862,6 +888,7 @@ var ClarusHeal = (() => {
     return hex.slice(0, 32);
   }
   function initSelfHealing(opts) {
+    if (typeof window === "undefined" || typeof document === "undefined") return;
     if (initialized) return;
     initialized = true;
     try {
@@ -993,7 +1020,7 @@ var ClarusHeal = (() => {
         sessionId,
         userIdHash,
         elementId,
-        route: location.pathname,
+        route: routeFromLocation(location),
         eventType,
         ts: (/* @__PURE__ */ new Date()).toISOString(),
         meta,
@@ -1179,14 +1206,31 @@ var ClarusHeal = (() => {
     window.addEventListener("focus", () => {
       void emit("FOCUS", null, { target: "window" });
     });
+    const navigation = new NavigationTracker(location);
+    function navigated(trigger) {
+      if (navigation.shouldRecord(trigger, location)) void emit("NAVIGATION", null, { trigger });
+    }
     void emit("NAVIGATION", null, { trigger: "initial" });
-    window.addEventListener("popstate", () => {
-      void emit("NAVIGATION", null, { trigger: "popstate" });
+    let lastNavigationType = null;
+    const navigationApi = window.navigation;
+    navigationApi?.addEventListener("navigate", (e) => {
+      lastNavigationType = e.navigationType ?? null;
     });
+    window.addEventListener("popstate", () => {
+      const trigger = classifyPopstate(lastNavigationType);
+      lastNavigationType = null;
+      navigated(trigger);
+    });
+    window.addEventListener("hashchange", () => navigated("hashchange"));
     const _pushState = history.pushState.bind(history);
     history.pushState = function(data, unused, url) {
       _pushState(data, unused, url);
-      void emit("NAVIGATION", null, { trigger: "pushstate" });
+      navigated("pushstate");
+    };
+    const _replaceState = history.replaceState.bind(history);
+    history.replaceState = function(data, unused, url) {
+      _replaceState(data, unused, url);
+      navigated("replacestate");
     };
     _state = {
       emit,

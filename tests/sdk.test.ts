@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { scrubText } from '@/sdk/scrubber'
 import { RageClickDetector } from '@/sdk/struggle-detector'
 import type { ElementId } from '@/lib/types/ui-map'
-import { readAutoInitOptions } from '@/sdk'
+import { initSelfHealing, readAutoInitOptions } from '@/sdk'
+import { NavigationTracker, classifyPopstate, routeFromLocation } from '@/sdk/route'
 
 describe('scrubText', () => {
   it('redacts emails', () => {
@@ -223,5 +224,87 @@ describe('RageClickDetector', () => {
     expect(r1.detected).toBe(true)
     const r2 = detector.observe(id1)
     expect(r2.detected).toBe(false)
+  })
+})
+
+describe('routeFromLocation', () => {
+  it('uses the pathname for history-mode routers', () => {
+    expect(routeFromLocation({ pathname: '/settings/billing', hash: '' })).toBe('/settings/billing')
+  })
+
+  it('reads the route from the fragment for hash-mode routers', () => {
+    expect(routeFromLocation({ pathname: '/', hash: '#/settings/billing' })).toBe('/settings/billing')
+    expect(routeFromLocation({ pathname: '/app/', hash: '#/orders/42?tab=items' })).toBe('/orders/42')
+  })
+
+  it('understands AngularJS hashbang routes', () => {
+    expect(routeFromLocation({ pathname: '/', hash: '#!/checkout' })).toBe('/checkout')
+  })
+
+  it('treats an in-page anchor as the same route', () => {
+    expect(routeFromLocation({ pathname: '/pricing', hash: '#faq' })).toBe('/pricing')
+  })
+
+  it('never returns an empty route', () => {
+    expect(routeFromLocation({ pathname: '', hash: '' })).toBe('/')
+    expect(routeFromLocation({ pathname: '/', hash: '#/?q=1' })).toBe('/')
+  })
+})
+
+describe('NavigationTracker', () => {
+  const at = (pathname: string, hash = '', search = '') => ({ pathname, search, hash })
+
+  it('records every pushState and popstate, even to the same URL', () => {
+    const nav = new NavigationTracker(at('/a'))
+    expect(nav.shouldRecord('pushstate', at('/a'))).toBe(true)
+    expect(nav.shouldRecord('popstate', at('/a'))).toBe(true)
+  })
+
+  it('ignores replaceState calls that do not change the route', () => {
+    const nav = new NavigationTracker(at('/a'))
+    expect(nav.shouldRecord('replacestate', at('/a'))).toBe(false)
+    // A search box synced into the query string is not a navigation.
+    expect(nav.shouldRecord('replacestate', at('/a', '', '?q=shoes'))).toBe(false)
+    // A redirect is.
+    expect(nav.shouldRecord('replacestate', at('/b'))).toBe(true)
+  })
+
+  it('does not treat an in-page anchor as a navigation', () => {
+    const nav = new NavigationTracker(at('/pricing'))
+    expect(nav.shouldRecord('hashchange', at('/pricing', '#faq'))).toBe(false)
+  })
+
+  it('records a hash-router move once, not once per event it fires', () => {
+    // A fragment navigation fires popstate, then hashchange, for one move.
+    const nav = new NavigationTracker(at('/', '#/home'))
+    expect(nav.shouldRecord('popstate', at('/', '#/cart'))).toBe(true)
+    expect(nav.shouldRecord('hashchange', at('/', '#/cart'))).toBe(false)
+    // A hashchange with no preceding popstate is still a move.
+    expect(nav.shouldRecord('hashchange', at('/', '#/checkout'))).toBe(true)
+  })
+})
+
+describe('classifyPopstate', () => {
+  it('reads a back/forward traversal as popstate', () => {
+    expect(classifyPopstate('traverse')).toBe('popstate')
+  })
+
+  it('reads a forward fragment move as hashchange, so it cannot count as back-thrash', () => {
+    expect(classifyPopstate('push')).toBe('hashchange')
+    expect(classifyPopstate('replace')).toBe('hashchange')
+  })
+
+  it('keeps the old reading when the Navigation API is unavailable', () => {
+    expect(classifyPopstate(null)).toBe('popstate')
+  })
+})
+
+describe('initSelfHealing during server-side rendering', () => {
+  it('is a silent no-op when there is no window or document', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(typeof window).toBe('undefined')
+    expect(() => initSelfHealing({ orgId: 'org_ssr' })).not.toThrow()
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
   })
 })
