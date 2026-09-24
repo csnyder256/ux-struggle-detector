@@ -32,7 +32,7 @@
     "lucide-react": "^1.47.0",
     "next": "^15.5.26",
     "next-auth": "5.0.0-beta.32",
-    "nodemailer": "^6.9.16",
+    "nodemailer": "^8.0.11",
     "openai": "^7.23.0",
     "playwright": "^1.63.0",
     "react": "^19.3.0",
