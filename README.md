@@ -72,7 +72,7 @@ Every extracted element gets a deterministic ID (`sh_` plus 32 hex chars) from `
 
 ### Pillar 2: the browser SDK
 
-`src/sdk/` is nine files, roughly 1,740 lines, zero runtime dependencies, bundled by esbuild into an IIFE at `public/sdk.min.js` (26,070 bytes; the unminified `sdk.js` is 46,220).
+`src/sdk/` is nine files, roughly 1,740 lines, zero runtime dependencies, bundled by esbuild into an IIFE at `public/sdk.min.js` (26,101 bytes; the unminified `sdk.js` is 46,326).
 
 ```html
 <script src="https://your-deployment/sdk.min.js"></script>
