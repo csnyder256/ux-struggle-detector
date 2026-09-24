@@ -236,12 +236,12 @@ var ClarusHeal = (() => {
   // src/sdk/transport.ts
   var Transport = class {
     constructor(orgId, endpoint, buffer, clockOffsetMs = 0, onInterventions, ingestKey) {
-      this.orgId = orgId;
-      this.endpoint = endpoint;
-      this.buffer = buffer;
-      this.clockOffsetMs = clockOffsetMs;
-      this.onInterventions = onInterventions;
-      this.ingestKey = ingestKey;
+      __publicField(this, "orgId", orgId);
+      __publicField(this, "endpoint", endpoint);
+      __publicField(this, "buffer", buffer);
+      __publicField(this, "clockOffsetMs", clockOffsetMs);
+      __publicField(this, "onInterventions", onInterventions);
+      __publicField(this, "ingestKey", ingestKey);
     }
     async flush() {
       const events = this.buffer.drain();
@@ -1166,13 +1166,13 @@ var ClarusHeal = (() => {
         message: String(e.reason ?? "unhandled rejection")
       });
     });
-    document.addEventListener("clarus-heal:validation", (e) => {
+    document.addEventListener("clarus-heal:validation", ((e) => {
       const detail = e.detail ?? {};
       void emit("VALIDATION_ERROR", detail.element ?? null, {
         kind: detail.kind ?? "format",
         field: detail.field ?? ""
       });
-    });
+    }));
     window.addEventListener("blur", () => {
       void emit("BLUR", null, { target: "window" });
     });

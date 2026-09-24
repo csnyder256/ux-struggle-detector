@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { Activity, AlertCircle, Check, Github, RefreshCcw, Settings } from 'lucide-react'
+import { Activity, AlertCircle, Check, RefreshCcw, Settings } from 'lucide-react'
+import { GithubMark } from '@/components/icons/GithubMark'
 import { getCurrentOrg } from '@/lib/access'
 import { prisma } from '@/lib/db'
 import { isGitHubAppConfigured } from '@/lib/github/app'
@@ -91,7 +92,7 @@ export default async function GitHubOnboardingPage({
         <div className="container mx-auto max-w-3xl px-6 py-12">
           <div className="mb-8 flex items-center gap-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl border bg-card shadow-sm">
-              <Github className="h-6 w-6" />
+              <GithubMark className="h-6 w-6" />
             </div>
             <div>
               <h1 className="text-3xl font-semibold tracking-tight">Connect GitHub</h1>
@@ -212,7 +213,7 @@ function NotInstalledCard() {
       <CardContent>
         <Link href="/api/github/install">
           <Button size="lg" className="w-full sm:w-auto">
-            <Github className="h-4 w-4" />
+            <GithubMark className="h-4 w-4" />
             Install on GitHub
           </Button>
         </Link>
