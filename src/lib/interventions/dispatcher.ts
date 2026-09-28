@@ -339,14 +339,31 @@ interface ValidationLite {
   inputType?: string
   min?: number | string
   max?: number | string
+  step?: number | string
+  customValidity?: string
+  customError?: boolean
+  tooShort?: boolean
+  tooLong?: boolean
+  typeMismatch?: boolean
+  patternMismatch?: boolean
+  badInput?: boolean
+  rangeUnderflow?: boolean
+  rangeOverflow?: boolean
+  stepMismatch?: boolean
 }
 
 /**
  * Convert a ValidationRules object into a single human-readable hint that
  * templates can splice in as `{validation}`.
+ *
+ * A message the customer wrote for the field (`setCustomValidity`) wins over
+ * anything reconstructed from the attributes: it is what their page already
+ * tells the user, and "this needs a valid VAT ID, not your card number" is
+ * better copy than "this needs a valid format".
  */
 function describeValidation(v: ValidationLite | undefined): string {
   if (!v) return ''
+  if (v.customValidity) return v.customValidity
   const parts: string[] = []
   if (v.required) parts.push('required')
   if (v.inputType === 'email') parts.push('valid email')
@@ -360,7 +377,22 @@ function describeValidation(v: ValidationLite | undefined): string {
   if (v.minLength) parts.push(`at least ${v.minLength} characters`)
   if (v.maxLength) parts.push(`at most ${v.maxLength} characters`)
   if (v.pattern && !v.inputType) parts.push('a valid format')
-  return parts.length > 0 ? `needs ${parts.join(', ')}` : ''
+  // Constraint failures the element raises itself. Without these, a field that
+  // only fails `customError` or a bad range described itself as needing
+  // nothing at all, and the rendered copy said "{label} ."
+  if (v.customError) parts.push('a valid value')
+  if (v.tooShort) parts.push('more characters')
+  if (v.tooLong) parts.push('fewer characters')
+  if (v.typeMismatch) parts.push('a valid format')
+  if (v.patternMismatch) parts.push('a valid format')
+  if (v.badInput) parts.push('a number')
+  if (v.rangeUnderflow) parts.push(`at least ${v.min ?? 'the minimum'}`)
+  if (v.rangeOverflow) parts.push(`at most ${v.max ?? 'the maximum'}`)
+  if (v.stepMismatch) parts.push(`a multiple of ${v.step ?? 'the allowed step'}`)
+  // Dedupe by the text that actually renders, so two rules that both describe
+  // "a valid format" do not read as "needs a valid format, a valid format".
+  const unique = Array.from(new Set(parts))
+  return unique.length > 0 ? `needs ${unique.join(', ')}` : ''
 }
 
 /** Deterministic variant pick keyed by session + struggle type (cold start). */

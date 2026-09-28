@@ -386,6 +386,17 @@ export async function POST(req: NextRequest) {
       inputType?: string
       min?: number | string
       max?: number | string
+      step?: number | string
+      customValidity?: string
+      customError?: boolean
+      tooShort?: boolean
+      tooLong?: boolean
+      typeMismatch?: boolean
+      patternMismatch?: boolean
+      badInput?: boolean
+      rangeUnderflow?: boolean
+      rangeOverflow?: boolean
+      stepMismatch?: boolean
     }
   >()
   for (const el of elementsWithSemantics) {

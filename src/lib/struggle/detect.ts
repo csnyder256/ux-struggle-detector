@@ -173,6 +173,12 @@ function detectRageClicks(
     // normally takes ~3 clicks/sec from real users (e.g. game UI) shouldn't
     // fire RAGE_CLICK at the static threshold of 3 clicks in 2s. Bump the
     // threshold so we need 1.5x the typical p95 rate sustained for the window.
+    //
+    // The floor stays at the static rule: a baseline LOWER than "3 clicks in
+    // 2s" must not make rage-click fire sooner than it does for an element we
+    // know nothing about. A calm element (a Delete button) is exactly the one
+    // where a false positive gets seen on a consequential screen, so the
+    // per-element data may only raise the bar here.
     let minClicks: number = rule.minClicks
     const baseline = sample.elementId ? ctx.baselines?.get(sample.elementId) : undefined
     if (baseline?.p95ClicksPerSec && baseline.sampleSize && baseline.sampleSize >= 10) {
@@ -180,20 +186,25 @@ function detectRageClicks(
       minClicks = Math.max(minClicks, adapted)
     }
     if (clicks.length < minClicks) continue
-    for (let i = minClicks - 1; i < clicks.length; i++) {
-      const start = clicks[i - minClicks + 1]!
-      const end = clicks[i]!
-      if (ts(end) - ts(start) <= rule.windowMs) {
-        out.push({
-          sessionId: end.sessionId,
-          elementId: end.elementId,
-          type: 'RAGE_CLICK',
-          severity: Math.min(1, clicks.length / (minClicks * 2)),
-          ts: end.ts,
-          summary: `${clicks.length} clicks within ${rule.windowMs}ms${minClicks !== rule.minClicks ? ` (adapted threshold: ${minClicks})` : ''}`,
-        })
-        break
-      }
+    // The window is a sliding one, not "the first `minClicks` clicks, ever".
+    // Walking it with a left pointer keeps a burst that arrives late in a long
+    // session detectable, which is the difference between catching a rage click
+    // and only catching it when it happens in the first few clicks of a
+    // session. Cost stays linear: neither pointer ever moves backwards.
+    let left = 0
+    for (let right = 0; right < clicks.length; right++) {
+      while (ts(clicks[right]!) - ts(clicks[left]!) > rule.windowMs) left++
+      if (right - left + 1 < minClicks) continue
+      const end = clicks[right]!
+      out.push({
+        sessionId: end.sessionId,
+        elementId: end.elementId,
+        type: 'RAGE_CLICK',
+        severity: Math.min(1, clicks.length / (minClicks * 2)),
+        ts: end.ts,
+        summary: `${clicks.length} clicks within ${rule.windowMs}ms${minClicks !== rule.minClicks ? ` (adapted threshold: ${minClicks})` : ''}`,
+      })
+      break
     }
   }
   return out

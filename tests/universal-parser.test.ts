@@ -51,6 +51,32 @@ describe('UniversalHtmlParser', () => {
     expect(labels).toContain('Your name')
   })
 
+  it('captures custom validation messages and native constraint flags', async () => {
+    await writeFile(
+      'validated.vue',
+      `<template>
+        <form>
+          <input name="vat" required setcustomvalidity="Enter the VAT ID from your invoice." />
+          <input name="count" type="number" step="5" min="1" max="99" />
+        </form>
+      </template>`,
+    )
+    const parser = new UniversalHtmlParser('vue')
+    const map = await parser.parse({
+      orgId: 'org_univ_validation',
+      source: { kind: 'repo', rootDir: scratch },
+    })
+    const vat = map.elements.find((e) => e.extraction?.name === 'vat')
+    expect(vat?.extraction?.validation?.customValidity).toBe(
+      'Enter the VAT ID from your invoice.',
+    )
+    expect(vat?.extraction?.validation?.required).toBe(true)
+
+    const count = map.elements.find((e) => e.extraction?.name === 'count')
+    expect(count?.extraction?.validation?.step).toBe(5)
+    expect(count?.extraction?.validation?.max).toBe(99)
+  })
+
   it('produces stable element ids across runs', async () => {
     await writeFile(
       'stable.svelte',

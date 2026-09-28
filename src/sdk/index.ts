@@ -452,7 +452,12 @@ function initInner(opts: InitOptions): void {
     { capture: false, passive: true },
   )
 
-  // ── Dwell (every 30s, last interactive element) ──────────────────────────
+  // ── Dwell (checked every second, emitted after a quiet stretch) ──────────
+  // The threshold is 15-30s, so the check is far cheaper than the threshold;
+  // waking every 1s turns "stared at a page and did nothing" from up to 30s
+  // late into ~1s late. A 30s tick also handed out a free verification reset:
+  // any progress at all within 30s looked idle. The interval itself is not the
+  // signal, so it must never be what the threshold is compared against.
   let lastInteractEl: Element | null = null
   let lastInteractTs = Date.now()
   document.addEventListener(
@@ -464,10 +469,14 @@ function initInner(opts: InitOptions): void {
   )
   window.setInterval(() => {
     const dwellMs = Date.now() - lastInteractTs
-    if (dwellMs >= 30_000) {
+    if (dwellMs >= 10_000) {
       void emit('DWELL', lastInteractEl, { ms: dwellMs })
+      // Report the quiet stretch once, then measure the next one from here.
+      // Without this the rule re-fires on every later tick for the same idle
+      // stretch, and the per-element dwell baseline ends up fed duplicates.
+      lastInteractTs = Date.now()
     }
-  }, 30_000)
+  }, 1000)
   document.addEventListener(
     'mousemove',
     (e) => {

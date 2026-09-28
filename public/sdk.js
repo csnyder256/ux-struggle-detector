@@ -1173,10 +1173,11 @@ var ClarusHeal = (() => {
     );
     window.setInterval(() => {
       const dwellMs = Date.now() - lastInteractTs;
-      if (dwellMs >= 3e4) {
+      if (dwellMs >= 1e4) {
         void emit("DWELL", lastInteractEl, { ms: dwellMs });
+        lastInteractTs = Date.now();
       }
-    }, 3e4);
+    }, 1e3);
     document.addEventListener(
       "mousemove",
       (e) => {

@@ -192,6 +192,38 @@ export function SignupForm() {
     expect(qty?.extraction?.validation?.max).toBe(99)
   })
 
+  it('captures a custom validation message and native constraint flags', async () => {
+    await writeFile(
+      'app/components/Custom.tsx',
+      `export function C() {
+  return (
+    <form>
+      <input name="vat" pattern="^[A-Z]{2}[0-9]+$" setCustomValidity="That is not a VAT ID." />
+      <input name="count" type="number" step={5} />
+      <input name="code" onInvalid={handleInvalid} setCustomValidity={dynamicMessage} />
+    </form>
+  )
+}`,
+    )
+    const parser = new ReactBabelParser()
+    const map = await parser.parse({
+      orgId: 'org_custom_validity',
+      source: { kind: 'repo', rootDir: scratch },
+    })
+
+    const vat = map.elements.find((e) => e.extraction?.name === 'vat')
+    expect(vat?.extraction?.validation?.customValidity).toBe('That is not a VAT ID.')
+    expect(vat?.extraction?.validation?.pattern).toBe('^[A-Z]{2}[0-9]+$')
+
+    const count = map.elements.find((e) => e.extraction?.name === 'count')
+    expect(count?.extraction?.validation?.step).toBe(5)
+
+    // A dynamic expression is not statically resolvable, so it is skipped
+    // rather than stringified into nonsense.
+    const code = map.elements.find((e) => e.extraction?.name === 'code')
+    expect(code?.extraction?.validation?.customValidity).toBeUndefined()
+  })
+
   it('infers semantic roles from labels and types', async () => {
     await writeFile(
       'app/components/Roles.tsx',
@@ -247,7 +279,9 @@ export function SignupForm() {
     const email = map.elements.find((e) => e.extraction?.name === 'email')
     expect(email?.extraction?.formContext).toBe('signupForm')
 
-    const form = map.elements.find((e) => e.elementType === 'FORM')
+    // The scratch dir is shared across this file, so match the form by the
+    // endpoint it declares rather than by being the first FORM in the tree.
+    const form = map.elements.find((e) => e.extraction?.endpoint === '/api/signup')
     expect(form?.extraction?.endpoint).toBe('/api/signup')
   })
 

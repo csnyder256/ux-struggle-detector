@@ -6,7 +6,7 @@
 ![TypeScript](https://img.shields.io/badge/typescript-5.6%20strict-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![Next.js](https://img.shields.io/badge/next.js-15%20app%20router-000000?style=flat-square&logo=nextdotjs&logoColor=white)
 ![Prisma](https://img.shields.io/badge/prisma-5%20%2F%20postgres-2D3748?style=flat-square&logo=prisma&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-179%20across%2010%20files-brightgreen?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-198%20across%2013%20files-brightgreen?style=flat-square)
 ![Detection rules](https://img.shields.io/badge/struggle%20rules-40-orange?style=flat-square)
 ![SDK](https://img.shields.io/badge/browser%20SDK-26%20KB%20minified-informational?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
@@ -87,7 +87,7 @@ Every extracted element gets a deterministic ID (`sh_` plus 32 hex chars) from `
 
 There is also a one-line auto-init form: a `<script>` tag carrying `data-org-id` is picked up by `readAutoInitOptions()` (`src/sdk/index.ts:563`), so no second script block is needed.
 
-It captures 15 event types (click, input change, submit, navigation, hover, scroll, dwell, paste, copy, focus, blur, keydown, JS error, validation error, custom), buffers to survive offline, and supports uniform, per-type, and predicate-based sampling.
+It captures 15 event types (click, input change, submit, navigation, hover, scroll, dwell, paste, copy, focus, blur, keydown, JS error, validation error, custom), buffers to survive offline, and supports uniform, per-type, and predicate-based sampling. A dwell is checked once a second and reported when the user has been quiet for 10s, so a 15s or 30s idle threshold is detected about when it happens rather than up to half a minute late; the quiet stretch is reported once and the next one is measured from there, so one idle period cannot pad the per-element dwell baseline with duplicates.
 
 It does not care what the host app is built with. Listeners sit at the document level, so it needs no framework hooks. Navigation is followed through `pushState`, `replaceState` (only when the route changes) and the back/forward buttons. For hash-mode routers (`#/cart`, AngularJS `#!/cart`), the route comes from the fragment, so those screens are not all reported as `/`. Where the browser has the Navigation API, a forward move to a new fragment is kept apart from a real back-button press, so clicking through hash links never reads as back-button thrash. Calling `initSelfHealing()` during a server render is a no-op, so frameworks that render on the server can call it from shared code.
 
@@ -116,7 +116,7 @@ Honest wrinkle: **the SDK emits 15 event types; the Prisma `EventType` enum pers
 | Auth (2) | `LOGIN_FAILURE`, `LOCKED_OUT` |
 | Other (3) | `KEYBOARD_LOST_FOCUS`, `COPY_BOUNCE`, `HELP_HUNT` |
 
-Detection thresholds are not constants. A nightly cron computes p95 click-rate, dwell, and hover baselines per element, and the detector consumes them, so a noisy game button gets a higher rage-click threshold than a Delete button.
+Detection thresholds are not constants. A nightly cron computes p95 click-rate, dwell, and hover baselines per element, and the detector consumes them, so a noisy game button gets a higher rage-click threshold than a Delete button. The baseline may only move a threshold in the direction of caution: an element whose history suggests a threshold *below* the static rule keeps the static rule, because under-firing on a quiet element is a missed hint while over-firing on it is an intervention the customer sees on a page where the user was never stuck. Rage-click windows slide — the burst is measured against the clicks around it, so a three-click burst in the last minute of a twenty-minute session fires the same way it would at the start.
 
 `src/lib/interventions/dispatcher.ts` (523 lines) picks what to show. It runs an epsilon-greedy multi-armed bandit (epsilon 0.1) over copy variants, weighted by empirical success rate with Laplace smoothing. `pickVariantDeterministic` takes over in two cases: below `banditMinSamples` (30) total impressions, and whenever the stats map is absent entirely. That guarantees both early exploration and reproducible unit tests. The RNG is injectable. The dispatcher honors a per-route denylist and per-intervention pause flags, and prefers LLM-precomputed copy from an `InterventionCache` over the 42 in-code templates in `library.ts`. The allowlist that makes this safe is enforced upstream, at cache-write time: the precompute worker only ever writes cache rows for the eight types in `VALID_RENDERER_TYPES` (`src/lib/interventions/precompute.ts:159`) - `OVERLAY`, `HIGHLIGHT`, `TOOLTIP`, `MODAL`, `BANNER`, `INLINE_HINT`, `CONFIRM`, `ANNOUNCE` - so invasive types can never be served from cache.
 
@@ -212,19 +212,21 @@ The four migration directory names read as the project's phase history: `init`, 
 
 `pnpm-workspace.yaml` exists at the root but contains only a build flag (`allowBuilds: esbuild: false`). There are no workspace packages. This is one Next.js application, deliberately, not a half-finished monorepo.
 
+Differs from `readValidation` in `react.ts` only in how the platform attributes behave, and both now carry the same rule set: text, numeric range, `step`, `minLength`/`maxLength`, `pattern`, `inputType`, the customer's own `setCustomValidity` message, and the constraint flags the field raises itself. The dispatcher renders that into the `{validation}` slot of the copy templates, so a field that fails only `rangeUnderflow` gets "needs at least 18" instead of a sentence with the constraint missing from it.
+
 ## Testing
 
-187 tests across 13 Vitest files.
+198 tests across 13 Vitest files.
 
 | File | Tests | Covers |
 | --- | --- | --- |
 | `sdk.test.ts` | 45 | PII scrubbing, buffering, sampling, route tracking |
-| `dispatcher.test.ts` | 40 | variant selection, bandit behavior, copy substitution |
-| `struggle.test.ts` | 33 | detection rules |
-| `react-parser.test.ts` | 12 | Babel JSX extraction |
+| `dispatcher.test.ts` | 45 | variant selection, bandit behavior, copy substitution |
+| `struggle.test.ts` | 37 | detection rules, sliding windows, adaptive thresholds |
+| `react-parser.test.ts` | 13 | Babel JSX extraction, validation rules |
 | `crawler.test.ts` | 11 | HTML crawl |
 | `ui-map.test.ts` | 11 | ElementId determinism |
-| `universal-parser.test.ts` | 10 | template scan across families |
+| `universal-parser.test.ts` | 11 | template scan across families |
 | `playwright-crawler.test.ts` | 6 | SPA crawl |
 | `crypto.test.ts` | 6 | AES-GCM round trip and tamper detection |
 | `dispatcher-denylist.test.ts` | 5 | route denylist |

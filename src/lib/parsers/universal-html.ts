@@ -579,6 +579,20 @@ function readValidationFromAttrs(
   if (attrs.pattern) v.pattern = attrs.pattern
   if (attrs.step) v.step = Number.isNaN(Number(attrs.step)) ? attrs.step : Number(attrs.step)
   if (tag === 'input' && attrs.type) v.inputType = attrs.type
+  // Custom messages for constraint failures. Kept off the conflict-prone rules
+  // for the same reason as the AST parser: the SDK sends `valueMissing` for a
+  // blank required field, and claiming a value-missing constraint here as well
+  // would fire REQUIRED_MISSED and FORMAT_ERROR for one mistake.
+  if (attrs.setcustomvalidity) v.customValidity = attrs.setcustomvalidity
+  if (attrs.customerror) v.customError = true
+  if (attrs.tooshort) v.tooShort = true
+  if (attrs.toolong) v.tooLong = true
+  if (attrs.typemismatch) v.typeMismatch = true
+  if (attrs.patternmismatch) v.patternMismatch = true
+  if (attrs.badinput) v.badInput = true
+  if (attrs.rangeunderflow) v.rangeUnderflow = true
+  if (attrs.rangeoverflow) v.rangeOverflow = true
+  if (attrs.stepmismatch) v.stepMismatch = true
   return v
 }
 
