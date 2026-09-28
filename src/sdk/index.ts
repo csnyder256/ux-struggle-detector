@@ -221,7 +221,13 @@ function initInner(opts: InitOptions): void {
         // send it with the validation failure, no server-side copy can recover it.
         if (v?.customError) {
           const message = el.validationMessage?.trim()
-          if (message) ctx.validationMessage = message.slice(0, 200)
+          if (message) {
+            // Custom errors can echo the field's value. Mask that echo before
+            // applying the configured PII scrubber, then enforce the wire size.
+            const value = el.value ?? ''
+            const withoutValue = value ? message.split(value).join('[redacted]') : message
+            ctx.validationMessage = scrubText(withoutValue, opts.piiPatterns).slice(0, 200)
+          }
         }
       }
     }
@@ -297,6 +303,10 @@ function initInner(opts: InitOptions): void {
     el: Element | null,
     meta?: RuntimeEvent['meta'],
   ): Promise<RuntimeEvent | null> {
+    if (!disabled.has(eventType) && interactEventTypes.has(eventType)) {
+      noteInteractElement(eventType, el)
+      if (eventType !== 'HOVER') markActivity()
+    }
     const run = emitChain.then(() => emitNow(eventType, el, meta))
     // Keep the chain alive even if one emit fails, so a single bad event does
     // not wedge every later one.
@@ -312,7 +322,6 @@ function initInner(opts: InitOptions): void {
     if (disabled.has(eventType)) return null
     // Which element a later DWELL will name. A disabled event type is not an
     // interaction the SDK recorded, so it does not move the pointer either.
-    if (interactEventTypes.has(eventType)) noteInteractElement(eventType, el)
     // Intervention outcome events (CUSTOM with meta.kind = 'intervention_*')
     // are also exempt regardless of sampling.
     const isOutcome =
@@ -519,6 +528,7 @@ function initInner(opts: InitOptions): void {
    * usually a decorative block with no interaction at all.
    */
   let lastInteractEl: Element | null = null
+  let lastStrongInteractEl: Element | null = null
   /**
    * Where the deferred `mousemove` update will land. A hover is the weakest
    * possible evidence of which element a dwell belongs to (moving the mouse
@@ -576,10 +586,12 @@ function initInner(opts: InitOptions): void {
     'SUBMIT',
     'PASTE',
     'FOCUS',
+    'HOVER',
   ])
   document.addEventListener(
     'mousemove',
-    () => {
+    (e) => {
+      pendingHoverEl = e.target as Element | null
       markActivity()
     },
     { capture: false, passive: true },
@@ -595,6 +607,7 @@ function initInner(opts: InitOptions): void {
    */
   function noteInteractElement(eventType: EventType, el: Element | null): void {
     if (el) {
+      lastStrongInteractEl = el
       lastInteractEl = el
       return
     }
@@ -602,7 +615,7 @@ function initInner(opts: InitOptions): void {
     // reads its target straight off the click / submit / input / paste / focus
     // event, so a null there means there is genuinely nothing to name and the
     // previous element should stand rather than be cleared.
-    if (eventType === 'HOVER' && pendingHoverEl) lastInteractEl = pendingHoverEl
+    if (eventType === 'HOVER' && !lastStrongInteractEl && pendingHoverEl) lastInteractEl = pendingHoverEl
   }
   window.setInterval(() => {
     const quietMs = Date.now() - lastInteractTs
@@ -611,6 +624,7 @@ function initInner(opts: InitOptions): void {
     // reset the timer, or a two-minute stare would be reported as 10s.
     const stretchMs = reportedThisStretch ? lastReportedMs + quietMs : quietMs
     if (stretchMs >= DWELL_REPORT_MS) {
+      noteInteractElement('HOVER', null)
       // `stretch` identifies the quiet stretch this report belongs to, so the
       // server can count one sample per stretch instead of one per heartbeat.
       void emit('DWELL', lastInteractEl, { ms: stretchMs, stretch: stretchId })
@@ -620,15 +634,6 @@ function initInner(opts: InitOptions): void {
       reportedThisStretch = true
     }
   }, 1000)
-  document.addEventListener(
-    'mousemove',
-    (e) => {
-      const t = e.target as Element | null
-      if (t) lastInteractEl = t
-    },
-    { capture: false, passive: true },
-  )
-
   // ── JS errors ────────────────────────────────────────────────────────────
   window.addEventListener('error', (e) => {
     void emit('JS_ERROR', null, {
@@ -663,7 +668,13 @@ function initInner(opts: InitOptions): void {
   // ── Navigation ───────────────────────────────────────────────────────────
   const navigation = new NavigationTracker(location)
   function navigated(trigger: NavigationTrigger): void {
-    if (navigation.shouldRecord(trigger, location)) void emit('NAVIGATION', null, { trigger })
+    if (navigation.shouldRecord(trigger, location)) {
+      lastStrongInteractEl = null
+      lastInteractEl = null
+      pendingHoverEl = null
+      markActivity()
+      void emit('NAVIGATION', null, { trigger })
+    }
   }
   void emit('NAVIGATION', null, { trigger: 'initial' })
   // The Navigation API (where present) fires `navigate` before `popstate`

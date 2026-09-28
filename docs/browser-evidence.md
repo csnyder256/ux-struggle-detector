@@ -4,15 +4,15 @@ Captured with **headless Chromium driving the built SDK bundle** — not jsdom.
 
 | Fact | Value |
 | --- | --- |
-| Source (at capture) | `SDK bundles are byte-identical to HEAD a5f3abd6b2b96479d964f658e231def4e0bf1441; bundle inputs clean at capture; working tree DIRTY at capture (3 path(s) uncommitted, e.g. src/lib/struggle/baselines.ts, tests/baselines-dwell-grouping.test.ts, tests/browser-evidence.test.ts) - the capture is HEAD's bundle bytes, not HEAD's tree` |
-| HEAD at capture | `a5f3abd6b2b96479d964f658e231def4e0bf1441` |
-| SDK bundle bytes vs HEAD | match - `public/sdk.js` and `public/sdk.min.js` are byte-identical to the blobs committed at `a5f3abd6b2b96479d964f658e231def4e0bf1441` (compared via `git show HEAD:<path>` sha256, not via `git status`) |
-| Bundle inputs at capture | clean - `src/sdk/index.ts` and both bundles are unmodified in the working tree |
-| Working tree at capture | **DIRTY** - 3 uncommitted path(s): `src/lib/struggle/baselines.ts`, `tests/baselines-dwell-grouping.test.ts`, `tests/browser-evidence.test.ts`. This capture executed the committed SDK bundle bytes above, NOT the working tree of `a5f3abd6b2b96479d964f658e231def4e0bf1441` |
+| Source (at capture) | `SDK bundles DIFFER from HEAD 5fb31597bb6f4356d2d9fe81d2f5f6c9e39a50a6; bundle inputs dirty at capture (public/sdk.js, public/sdk.min.js, src/sdk/index.ts); working tree DIRTY at capture (14 path(s) uncommitted, e.g. docs/browser-evidence.md, public/sdk.js, public/sdk.min.js, src/app/api/events/route.ts) - the capture uses the measured bundle bytes and records working-tree edits` |
+| HEAD at capture | `5fb31597bb6f4356d2d9fe81d2f5f6c9e39a50a6` |
+| SDK bundle bytes vs HEAD | **DIFFER** - the executed bundle is not the blob committed at `5fb31597bb6f4356d2d9fe81d2f5f6c9e39a50a6` |
+| Bundle inputs at capture | **dirty** - uncommitted edits to `public/sdk.js`, `public/sdk.min.js`, `src/sdk/index.ts` |
+| Working tree at capture | **DIRTY** - 14 uncommitted path(s): `docs/browser-evidence.md`, `public/sdk.js`, `public/sdk.min.js`, `src/app/api/events/route.ts`, `src/lib/interventions/dispatcher.ts`, `src/lib/struggle/detect.ts`, `src/lib/types/events.ts`, `src/sdk/index.ts`, `src/sdk/renderers.ts`, `tests/browser-evidence.test.ts`, `tests/dispatcher.test.ts`, `tests/sdk-renderers.test.ts`, `tests/sdk-validity-flow.test.ts`, `tests/struggle.test.ts`. This capture records the measured SDK bundle bytes above and uncommitted paths relative to `5fb31597bb6f4356d2d9fe81d2f5f6c9e39a50a6` |
 | Chromium | `Chromium 154.0.8037.57 built on Debian GNU/Linux 12 (bookworm)` (`/usr/bin/chromium`) |
 | Node | `v22.23.2` |
-| `public/sdk.js` sha256 | `a0250c34e9dfec651bf9061a18f2301fe07eaa4e19334d63d0f0a592298da5cc` |
-| `public/sdk.min.js` sha256 | `c7241244b195ad059a79819fe25ef9b58b5e0f0c7024acf471ffc1bda84bca29` |
+| `public/sdk.js` sha256 | `27e973f89e3b1387f91c4c0a4d8031c199ceb1f32f9866cfccd61e2ce7c97728` |
+| `public/sdk.min.js` sha256 | `6dbd4139d426e14114ee24c7a06ee7f0c861401f7f36639090dbde9794af49a6` |
 
 Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
 
@@ -20,19 +20,34 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
 
 ```json
 {
-  "headAtCapture": "a5f3abd6b2b96479d964f658e231def4e0bf1441",
+  "headAtCapture": "5fb31597bb6f4356d2d9fe81d2f5f6c9e39a50a6",
   "workingTreeDirtyAtCapture": true,
   "dirtyPathsAtCapture": [
-    "src/lib/struggle/baselines.ts",
-    "tests/baselines-dwell-grouping.test.ts",
-    "tests/browser-evidence.test.ts"
+    "docs/browser-evidence.md",
+    "public/sdk.js",
+    "public/sdk.min.js",
+    "src/app/api/events/route.ts",
+    "src/lib/interventions/dispatcher.ts",
+    "src/lib/struggle/detect.ts",
+    "src/lib/types/events.ts",
+    "src/sdk/index.ts",
+    "src/sdk/renderers.ts",
+    "tests/browser-evidence.test.ts",
+    "tests/dispatcher.test.ts",
+    "tests/sdk-renderers.test.ts",
+    "tests/sdk-validity-flow.test.ts",
+    "tests/struggle.test.ts"
   ],
-  "bundleSourceDirtyAtCapture": false,
-  "bundleDirtyPathsAtCapture": [],
-  "sdkBundleMatchesHead": true,
-  "sdkMinBundleMatchesHead": true,
-  "bundleMatchesHead": true,
-  "sourceLabel": "SDK bundles are byte-identical to HEAD a5f3abd6b2b96479d964f658e231def4e0bf1441; bundle inputs clean at capture; working tree DIRTY at capture (3 path(s) uncommitted, e.g. src/lib/struggle/baselines.ts, tests/baselines-dwell-grouping.test.ts, tests/browser-evidence.test.ts) - the capture is HEAD's bundle bytes, not HEAD's tree"
+  "bundleSourceDirtyAtCapture": true,
+  "bundleDirtyPathsAtCapture": [
+    "public/sdk.js",
+    "public/sdk.min.js",
+    "src/sdk/index.ts"
+  ],
+  "sdkBundleMatchesHead": false,
+  "sdkMinBundleMatchesHead": false,
+  "bundleMatchesHead": false,
+  "sourceLabel": "SDK bundles DIFFER from HEAD 5fb31597bb6f4356d2d9fe81d2f5f6c9e39a50a6; bundle inputs dirty at capture (public/sdk.js, public/sdk.min.js, src/sdk/index.ts); working tree DIRTY at capture (14 path(s) uncommitted, e.g. docs/browser-evidence.md, public/sdk.js, public/sdk.min.js, src/app/api/events/route.ts) - the capture uses the measured bundle bytes and records working-tree edits"
 }
 ```
 
@@ -93,18 +108,18 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
   "withValidity": [
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790584192969_i9dbe1dg_1790584192977_jxnyvege",
-      "sessionId": "sh_sess_1790584192969_i9dbe1dg",
+      "idempotencyKey": "sh_sess_1790622124619_4iztywwz_1790622124630_7og0am1q",
+      "sessionId": "sh_sess_1790622124619_4iztywwz",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "FOCUS",
-      "ts": "2026-09-28T08:29:52.977Z",
+      "ts": "2026-09-28T19:02:04.630Z",
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 7
+        "ageMs": 11
       },
       "element": {
         "touched": true,
@@ -118,19 +133,19 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790584192969_i9dbe1dg_1790584192977_yp86rf9i",
-      "sessionId": "sh_sess_1790584192969_i9dbe1dg",
+      "idempotencyKey": "sh_sess_1790622124619_4iztywwz_1790622124633_a0m906xe",
+      "sessionId": "sh_sess_1790622124619_4iztywwz",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "CLICK",
-      "ts": "2026-09-28T08:29:52.977Z",
+      "ts": "2026-09-28T19:02:04.633Z",
       "meta": {},
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 7
+        "ageMs": 14
       },
       "element": {
         "touched": true,
@@ -144,18 +159,18 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790584192969_i9dbe1dg_1790584192978_9akm65yb",
-      "sessionId": "sh_sess_1790584192969_i9dbe1dg",
+      "idempotencyKey": "sh_sess_1790622124619_4iztywwz_1790622124634_36v59yqy",
+      "sessionId": "sh_sess_1790622124619_4iztywwz",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "BLUR",
-      "ts": "2026-09-28T08:29:52.978Z",
+      "ts": "2026-09-28T19:02:04.634Z",
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 8
+        "ageMs": 15
       },
       "element": {
         "touched": true,
@@ -169,18 +184,18 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790584192969_i9dbe1dg_1790584192978_537ywl6k",
-      "sessionId": "sh_sess_1790584192969_i9dbe1dg",
+      "idempotencyKey": "sh_sess_1790622124619_4iztywwz_1790622124635_h2vj2c3u",
+      "sessionId": "sh_sess_1790622124619_4iztywwz",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "FOCUS",
-      "ts": "2026-09-28T08:29:52.978Z",
+      "ts": "2026-09-28T19:02:04.635Z",
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 8
+        "ageMs": 16
       },
       "element": {
         "touched": true,
@@ -193,19 +208,19 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790584192969_i9dbe1dg_1790584192979_bufgnj2c",
-      "sessionId": "sh_sess_1790584192969_i9dbe1dg",
+      "idempotencyKey": "sh_sess_1790622124619_4iztywwz_1790622124635_rc7k0eu4",
+      "sessionId": "sh_sess_1790622124619_4iztywwz",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "CLICK",
-      "ts": "2026-09-28T08:29:52.979Z",
+      "ts": "2026-09-28T19:02:04.635Z",
       "meta": {},
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 9
+        "ageMs": 17
       },
       "element": {
         "touched": true,

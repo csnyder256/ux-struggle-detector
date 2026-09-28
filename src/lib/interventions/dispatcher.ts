@@ -15,6 +15,7 @@
  * the dispatcher returns []. The SDK still collects events.
  */
 
+import { createHash } from 'node:crypto'
 import { STRUGGLE_INTERVENTIONS, type InterventionTemplate } from './library'
 import type {
   DispatchedIntervention,
@@ -24,6 +25,8 @@ import type {
 } from '@/lib/types/events'
 
 export interface DispatchContext {
+  /** Organization owning the persisted rows and their feedback. */
+  orgId?: string
   /** Map elementId → labelRaw (for {label} substitution). Optional. */
   elementLabels?: Map<string, string | null>
   /**
@@ -70,11 +73,11 @@ export interface DispatchContext {
     }
   >
   /**
-   * Map elementId → the validation message a real page set on it at runtime
+   * Map sessionId → elementId → the scrubbed validation message a real page set on it at runtime
    * (`setCustomValidity`), captured off the failing event. The browser owns
    * that string and drops it on reload, so this is the only copy available.
    */
-  validationMessageByElement?: Map<string, string>
+  validationMessageByElement?: Map<string, Map<string, string>>
   /** Map elementId → semantic role (SUBMIT / DANGER / etc.). */
   elementRoles?: Map<string, string>
   /** When true (default in first 7 days post-install), no interventions render. */
@@ -139,7 +142,7 @@ export function dispatchInterventions(
   ctx: DispatchContext,
 ): DispatchedIntervention[] {
   return dispatchInterventionsWithRows(detections, ctx).map(
-    ({ rowId: _rowId, variantGroup: _vg, variantIndex: _vi, ...d }) => d,
+    ({ variantGroup: _vg, variantIndex: _vi, ...d }) => d,
   )
 }
 
@@ -182,6 +185,7 @@ export function dispatchInterventionsWithRows(
       ctx.banditEpsilon ?? 0.1,
       ctx.banditMinSamples ?? 30,
       ctx.random,
+      ctx.orgId ?? '',
     )
     let tmpl = variantPool[variantIndex]!
     let isCached = cached === variantPool
@@ -207,7 +211,7 @@ export function dispatchInterventionsWithRows(
     // Tracking id (session-keyed) for SDK dedup + in-batch dedup.
     const trackingId = sdkTrackingId(det.sessionId, det.type, det.elementId, variantIndex)
     // Population-keyed row id used for DB persistence + bandit stats aggregation.
-    const rowId = populationRowId(det.type, det.elementId, variantIndex)
+    const rowId = populationRowId(det.type, det.elementId, variantIndex, ctx.orgId ?? '')
     if (usedKeys.has(trackingId)) continue
     if (ctx.alreadyShown?.has(trackingId)) continue
     usedKeys.add(trackingId)
@@ -226,7 +230,7 @@ export function dispatchInterventionsWithRows(
     // map can assert, so it is preferred. Prefer the session's own capture from
     // the failing field, then any capture for this element.
     const runtimeValidityMessage =
-      (det.elementId ? ctx.validationMessageByElement?.get(det.elementId) : null) ?? null
+      (det.elementId ? ctx.validationMessageByElement?.get(det.sessionId)?.get(det.elementId) : null) ?? null
     const validationHint = asSentenceFragment(
       describeValidation(validation, runtimeValidityMessage),
     )
@@ -522,6 +526,7 @@ function pickVariantBandit(
   epsilon: number,
   minSamples: number,
   random: (() => number) | undefined,
+  orgId: string,
 ): number {
   if (n <= 1) return 0
   const rng = random ?? Math.random
@@ -530,7 +535,7 @@ function pickVariantBandit(
   let totalImpressions = 0
   const perVariant: { impressions: number; successes: number }[] = []
   for (let i = 0; i < n; i++) {
-    const id = populationRowId(type, elementId, i)
+    const id = populationRowId(type, elementId, i, orgId)
     const s = stats.get(id) ?? { impressions: 0, successes: 0 }
     perVariant.push(s)
     totalImpressions += s.impressions
@@ -583,7 +588,7 @@ function sdkTrackingId(
 
 /**
  * Population-keyed row id - used for the persisted Intervention row, which
- * aggregates impressions/successes across all sessions. Stripping sessionId
+ * aggregates impressions/successes across sessions in one organization. Stripping sessionId
  * is what makes the bandit's stats lookup work: every session's render of
  * (type, element, variant) updates the same row.
  */
@@ -591,18 +596,10 @@ function populationRowId(
   type: StruggleType,
   elementId: string | null,
   variantIndex: number,
+  orgId: string,
 ): string {
-  const s = `${type}|${elementId ?? '_'}|v${variantIndex}`
-  let h1 = 0
-  let h2 = 0
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i)
-    h1 = (h1 << 5) - h1 + c
-    h2 = (h2 * 31 + c) | 0
-    h1 |= 0
-  }
-  const hex = (Math.abs(h1).toString(16) + Math.abs(h2).toString(16)).slice(0, 16).padEnd(16, '0')
-  return `iv_${hex}`
+  const key = JSON.stringify([orgId, type, elementId, variantIndex])
+  return `iv_${createHash('sha256').update(key).digest('hex')}`
 }
 
 /** For tests + previews: pull the first template from a struggle type. */
@@ -632,8 +629,9 @@ export function pickVariantBanditForTest(
   epsilon: number,
   minSamples: number,
   random?: () => number,
+  orgId = '',
 ): number {
-  return pickVariantBandit(sessionId, type, elementId, n, stats, epsilon, minSamples, random)
+  return pickVariantBandit(sessionId, type, elementId, n, stats, epsilon, minSamples, random, orgId)
 }
 
 /** Test-only access to the population row id. */
@@ -641,8 +639,9 @@ export function populationRowIdForTest(
   type: StruggleType,
   elementId: string | null,
   variantIndex: number,
+  orgId = '',
 ): string {
-  return populationRowId(type, elementId, variantIndex)
+  return populationRowId(type, elementId, variantIndex, orgId)
 }
 
 export type { InterventionRenderType }

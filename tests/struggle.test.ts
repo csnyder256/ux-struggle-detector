@@ -461,3 +461,12 @@ describe('detectStruggles - help hunt', () => {
     expect(detectStruggles([e]).some((d) => d.type === 'HELP_HUNT')).toBe(true)
   })
 })
+
+
+it('rage severity counts the burst and excludes unrelated earlier clicks', () => {
+  const burst = [100000, 100500, 101000].map((tsOffsetMs) => makeEvent({ tsOffsetMs, elementId: E1 }))
+  const sparse = Array.from({ length: 20 }, (_, i) => makeEvent({ tsOffsetMs: i * 3000, elementId: E1 }))
+  const rage = detectStruggles([...sparse, ...burst]).find((d) => d.type === 'RAGE_CLICK')!
+  expect(rage.severity).toBe(0.5)
+  expect(rage.summary).toMatch(/^3 clicks within /)
+})

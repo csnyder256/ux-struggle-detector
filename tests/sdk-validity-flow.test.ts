@@ -114,7 +114,7 @@ describe('runtime setCustomValidity reaches the copy the user sees', () => {
       const dispatched = dispatchInterventions([validationDetection()], {
         safeMode: false,
         elementLabels: new Map([[E1, 'Tax ID']]),
-        validationMessageByElement: new Map([[E1, carried as string]]),
+        validationMessageByElement: new Map([['sess_1', new Map([[E1, carried as string]])]]),
       })
       expect(dispatched).toHaveLength(1)
       expect(dispatched[0]?.copy).toContain('That is a card number, not a VAT ID')
@@ -262,7 +262,7 @@ describe('numeric constraints render honest, usable guidance', () => {
       safeMode: false,
       elementLabels: new Map([[E1, 'Tax ID']]),
       validationMessageByElement: new Map([
-        [E1, 'That is a card number, not a VAT ID.'],
+        ['sess_1', new Map([[E1, 'That is a card number, not a VAT ID.']])],
       ]),
     })
     expect(dispatched).toHaveLength(1)
@@ -270,4 +270,36 @@ describe('numeric constraints render honest, usable guidance', () => {
     expect(copy).toContain('That is a card number, not a VAT ID.')
     expect(copy).not.toMatch(/\.\./)
   })
+})
+
+
+it('scrubs field echoes and personal data before sending a custom validity message', async () => {
+  const run = await bootSdk('<form><input id="private" name="private"></form>')
+  try {
+    const input = run.doc.getElementById('private') as HTMLInputElement
+    input.value = 'private-label'
+    input.setCustomValidity('private-label belongs to person@example.com; call 415-555-2671')
+    input.focus()
+    click(input)
+    await settleUntil(run, (e) => Boolean(e.element?.validationMessage))
+    const messages = run.events.map((e) => e.element?.validationMessage).filter(Boolean)
+    expect(messages.length).toBeGreaterThan(0)
+    expect(messages.join(' ')).not.toMatch(/private-label|person@example.com|415-555-2671/)
+  } finally { run.stop() }
+})
+
+it('keeps runtime validation messages isolated by session', () => {
+  const first = validationDetection()
+  const second = { ...first, sessionId: 'sess_2' }
+  const messages = new Map([
+    ['sess_1', new Map([[E1, 'First session message']])],
+    ['sess_2', new Map([[E1, 'Second session message']])],
+  ])
+  const results = dispatchInterventions([first, second], {
+    safeMode: false, validationMessageByElement: messages,
+  })
+  expect(results).toHaveLength(2)
+  expect(results[0]!.copy).toContain('First session message')
+  expect(results[0]!.copy).not.toContain('Second session message')
+  expect(results[1]!.copy).toContain('Second session message')
 })

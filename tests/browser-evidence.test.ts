@@ -268,7 +268,7 @@ describe('real Chromium evidence', () => {
       {
         safeMode: false,
         elementLabels: new Map([[elementId, 'Tax ID']]),
-        validationMessageByElement: new Map([[elementId, message]]),
+        validationMessageByElement: new Map([[data!.sessionId, new Map([[elementId, message]])]]),
       },
     )
     const contract = {

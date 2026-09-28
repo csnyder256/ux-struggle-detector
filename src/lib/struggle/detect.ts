@@ -188,28 +188,27 @@ function detectRageClicks(
       minClicks = Math.max(minClicks, adapted)
     }
     if (clicks.length < minClicks) continue
-    // The scan below walks a sliding window with a left pointer instead of
-    // measuring only the first `minClicks` clicks of the bucket. Both shapes
-    // reach the same verdict - the previous loop already stepped
-    // `i` across every consecutive `minClicks` group - so this is a linear
-    // refactor, not a behaviour fix: the cost is still linear (neither pointer
-    // moves backwards) and the reader no longer has to prove to themselves that
-    // a burst late in a long session is reachable.
+    // Count the actual burst window; unrelated earlier clicks must not inflate
+    // the severity or the claim about how many clicks occurred in this window.
     let left = 0
+    let bestCount = 0
+    let bestEnd = clicks[0]!
     for (let right = 0; right < clicks.length; right++) {
       while (ts(clicks[right]!) - ts(clicks[left]!) > rule.windowMs) left++
-      if (right - left + 1 < minClicks) continue
-      const end = clicks[right]!
-      out.push({
-        sessionId: end.sessionId,
-        elementId: end.elementId,
-        type: 'RAGE_CLICK',
-        severity: Math.min(1, clicks.length / (minClicks * 2)),
-        ts: end.ts,
-        summary: `${clicks.length} clicks within ${rule.windowMs}ms${minClicks !== rule.minClicks ? ` (adapted threshold: ${minClicks})` : ''}`,
-      })
-      break
+      const count = right - left + 1
+      if (count > bestCount) {
+        bestCount = count
+        bestEnd = clicks[right]!
+      }
     }
+    if (bestCount >= minClicks) out.push({
+      sessionId: bestEnd.sessionId,
+      elementId: bestEnd.elementId,
+      type: 'RAGE_CLICK',
+      severity: Math.min(1, bestCount / (minClicks * 2)),
+      ts: bestEnd.ts,
+      summary: `${bestCount} clicks within ${rule.windowMs}ms${minClicks !== rule.minClicks ? ` (adapted threshold: ${minClicks})` : ''}`,
+    })
   }
   return out
 }

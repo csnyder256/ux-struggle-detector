@@ -6,7 +6,6 @@
 ![TypeScript](https://img.shields.io/badge/typescript-5.6%20strict-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![Next.js](https://img.shields.io/badge/next.js-15%20app%20router-000000?style=flat-square&logo=nextdotjs&logoColor=white)
 ![Prisma](https://img.shields.io/badge/prisma-5%20%2F%20postgres-2D3748?style=flat-square&logo=prisma&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-220%20across%2018%20files-brightgreen?style=flat-square)
 ![Detection rules](https://img.shields.io/badge/struggle%20rules-40-orange?style=flat-square)
 ![SDK](https://img.shields.io/badge/browser%20SDK-26%20KB%20minified-informational?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
@@ -16,7 +15,7 @@ Built under the product name **Clarus Heal**. It maps a customer's web app UI, e
 Three pillars:
 
 1. **Map the UI first.** Framework detection across 46 registry entries in 22 families, a Babel AST parser for React and Preact, a universal template scanner for everything else, plus an LLM pass that gives each element a semantic name and intent.
-2. **Watch from the browser.** A dependency-free SDK (1,919 lines, 27 KB minified) capturing 15 event types with client-side PII masking, offline buffering, and sampling.
+2. **Watch from the browser.** A dependency-free SDK  capturing 15 event types with client-side PII masking, offline buffering, and sampling.
 3. **Decide and intervene server-side.** 40 detection rules over hydrated session history, then a bandit-driven dispatcher that returns an overlay, tooltip, or hint inline.
 
 ---
@@ -72,7 +71,7 @@ Every extracted element gets a deterministic ID (`sh_` plus 32 hex chars) from `
 
 ### Pillar 2: the browser SDK
 
-`src/sdk/` is nine files, 1,919 lines, zero runtime dependencies, bundled by esbuild into an IIFE at `public/sdk.min.js` (26,773 bytes; the unminified `sdk.js` is 48,392).
+`src/sdk/` has zero runtime dependencies and is bundled by esbuild into `public/sdk.js` and `public/sdk.min.js`. Both bundles are rebuilt from the reviewed source.
 
 ```html
 <script src="https://your-deployment/sdk.min.js"></script>
@@ -102,12 +101,13 @@ Honest wrinkle: **the SDK emits 15 event types; the Prisma `EventType` enum pers
 Every renderer draws inline-styled DOM under one root container and works out its own geometry with `getBoundingClientRect()`. Three properties of that fall out of the tests in `sdk-renderers.test.ts`, and each of them was a defect before it was a property:
 
 - **Anchored panels stay inside the viewport.** `TOOLTIP`, `INLINE_HINT` and `ARROW` place themselves relative to their target, and clamp into the viewport when that target sits at an edge. An unclamped placement renders off-screen, which a user cannot tell apart from an intervention that never rendered at all.
-- **`SPOTLIGHT` describes its hole in percentages of the overlay box, never in viewport pixels.** A basic shape in a `clip-path` resolves against the box it is applied to, and this box is `position: fixed; inset: 0`. Pixel coordinates would therefore be measured from the overlay's own origin - the same origin as the viewport only by coincidence - so the hole could land outside the box, the subpaths would not close, and the `clip-path` would resolve to nothing, leaving the dimmer painted over the very element it exists to reveal. The shape uses `evenodd` with the outer rectangle first and the hole second.
-- **Outcome events carry the persisted row id, not the session-keyed render id.** The dispatcher keeps two: `id`, session-keyed, for in-browser dedup; and `rowId`, population-keyed, which the `Intervention` row is upserted under. `/api/events` resolves an outcome with `prisma.intervention.update({ where: { id: iid } })` against the row, so reporting the session-keyed id increments nothing and writes no impression - the counts the bandit learns from stay at zero. The type carries `rowId` as optional, and the SDK falls back to `id` for a locally rendered intervention (its own rage-click fallback) that no row was ever written for.
+- **`SPOTLIGHT` uses a viewport-sized fixed overlay with an even-odd clip.** Its rectangular hole follows the target's viewport geometry, including after scrolling.
+- **Feedback carries both IDs end to end.** `id` is session-keyed for deduplication; `rowId` is SHA-256 over organization, struggle, element and variant for population feedback. The API retains `rowId` in its SDK response and scopes outcome writes to the authenticated organization. Old unscoped rows remain historical; new rows accumulate organization-scoped statistics. Element-free interventions currently have no persisted feedback row.
+- **Validation copy stays within its session and renders as text.** The SDK removes an echoed field value and scrubs recognized PII before uploading a validation message. It remains a pattern-based scrubber, not a guarantee that every possible personal datum can be recognized.
 
 ### Pillar 3: detection and intervention
 
-`src/app/api/events/route.ts` (639 lines) is the hot path. Per batch it authenticates the org against a hashed ingest key, Zod-validates against a versioned wire schema (`EVENT_SCHEMA_VERSION` is 3 and versions 1 and 2 are still accepted, so old cached SDK bundles in customers' browsers keep working through a rollout), persists, hydrates up to 1,000 stored events from a 5-minute lookback for the sessions in the batch, loads per-element baselines, runs the detector, records outcomes from prior impressions, and dispatches interventions inline.
+`src/app/api/events/route.ts` is the hot path. Per batch it authenticates the org against a hashed ingest key, Zod-validates against a versioned wire schema (`EVENT_SCHEMA_VERSION` is 3 and versions 1 and 2 are still accepted, so old cached SDK bundles in customers' browsers keep working through a rollout), persists, hydrates up to 1,000 stored events from a 5-minute lookback for the sessions in the batch, loads per-element baselines, runs the detector, records outcomes from prior impressions, and dispatches interventions inline.
 
 **Idempotent ingest by construction.** A `(orgId, idempotencyKey)` unique index plus `createMany({ skipDuplicates: true })` means the SDK offline replay buffer can retry as aggressively as it likes with zero server-side dedup logic.
 
@@ -208,10 +208,10 @@ src/
     enrichment/        LLM passes over elements and routes
     providers/         ModelProvider interface + anthropic / openai
     crypto/ auth/ usage/ github/ db/ access.ts
-  sdk/                 dependency-free browser SDK (9 files, 1,919 LOC)
+  sdk/                 dependency-free browser SDK
   components/          hand-written shadcn-style primitives (no Radix dependency)
 prisma/                schema.prisma, 4 applied migrations
-tests/                 14 Vitest files, 191 tests
+tests/                 Vitest unit, DOM and Chromium coverage
 scripts/               setup.sh, setup.ps1
 public/                sdk.js, sdk.min.js (checked-in esbuild output), demo/
 ```
@@ -226,37 +226,37 @@ Differs from `readValidation` in `react.ts` only in how the platform attributes 
 
 ## Testing
 
-220 tests across 18 Vitest files.
+Run `pnpm test` for the current test inventory. The suite covers unit logic, SDK DOM flows and a real Chromium capture-to-dispatch flow.
 
-| File | Tests | Covers |
-| --- | --- | --- |
-| `sdk.test.ts` | 45 | PII scrubbing, buffering, sampling, route tracking |
-| `dispatcher.test.ts` | 45 | variant selection, bandit behavior, copy substitution |
-| `struggle.test.ts` | 37 | detection rules, sliding windows, adaptive thresholds |
-| `react-parser.test.ts` | 13 | Babel JSX extraction, validation rules |
-| `crawler.test.ts` | 11 | HTML crawl |
-| `ui-map.test.ts` | 11 | ElementId determinism |
-| `universal-parser.test.ts` | 11 | template scan across families |
-| `playwright-crawler.test.ts` | 6 | SPA crawl |
-| `crypto.test.ts` | 6 | AES-GCM round trip and tamper detection |
-| `dispatcher-denylist.test.ts` | 5 | route denylist |
-| `email-sign-in.test.ts` | 4 | magic-link delivery over SMTP, sign-in address rules |
-| `sdk-scrubber-phone-bounds.test.ts` | 4 | phone-pattern bounds: suffix of a longer digit run is not redacted |
-| `ingest-schema.test.ts` | 3 | over-long page text is cut, not a rejected batch |
-| `session-payload.test.ts` | 1 | `/api/auth/session` never exposes the session token |
-| `sdk-dwell-backend.test.ts` | 5 | SDK dwell timer driven against a real DOM, its events fed to the real detector |
-| `sdk-dwell-stretch-flow.test.ts` | 4 | SDK stretch identity through the wire schema into the real baseline grouping |
-| `baselines-dwell-grouping.test.ts` | 4 | dwell p95 weighted per quiet stretch, not per heartbeat row |
-| `sdk-validity-flow.test.ts` | 8 | runtime `setCustomValidity` capture through ingest into rendered copy |
-| `browser-evidence.test.ts` | 1 | real headless Chromium: browser constraint API, SDK capture, ingest and dispatcher |
+| File | Covers |
+| --- | --- |
+| `sdk.test.ts` | PII scrubbing, buffering, sampling, route tracking |
+| `dispatcher.test.ts` | variant selection, bandit behavior, copy substitution |
+| `struggle.test.ts` | detection rules, sliding windows, adaptive thresholds |
+| `react-parser.test.ts` | Babel JSX extraction, validation rules |
+| `crawler.test.ts` | HTML crawl |
+| `ui-map.test.ts` | ElementId determinism |
+| `universal-parser.test.ts` | template scan across families |
+| `playwright-crawler.test.ts` | SPA crawl |
+| `crypto.test.ts` | AES-GCM round trip and tamper detection |
+| `dispatcher-denylist.test.ts` | route denylist |
+| `email-sign-in.test.ts` | magic-link delivery over SMTP, sign-in address rules |
+| `sdk-scrubber-phone-bounds.test.ts` | phone-pattern bounds: suffix of a longer digit run is not redacted |
+| `ingest-schema.test.ts` | over-long page text is cut, not a rejected batch |
+| `session-payload.test.ts` | `/api/auth/session` never exposes the session token |
+| `sdk-dwell-backend.test.ts` | SDK dwell timer driven against a real DOM, its events fed to the real detector |
+| `sdk-dwell-stretch-flow.test.ts` | SDK stretch identity through the wire schema into the real baseline grouping |
+| `baselines-dwell-grouping.test.ts` | dwell p95 weighted per quiet stretch, not per heartbeat row |
+| `sdk-validity-flow.test.ts` | runtime `setCustomValidity` capture through ingest into rendered copy |
+| `browser-evidence.test.ts` | real headless Chromium: browser constraint API, SDK capture, ingest and dispatcher |
 
-The two SDK files run against a live jsdom document, which is a DOM implementation, not a browser. jsdom implements `setCustomValidity` and the constraint API well enough to drive the SDK's real code path, but it does **not** compute `badInput`, and it is not proof of browser behaviour. `sdk-validity-flow.test.ts` therefore mocks the `badInput` validity state (installing both `validity` and `checkValidity` so the two agree) and says so in the test; the real-browser observation is recorded separately in `docs/browser-evidence.md`, captured with headless Chromium against the built SDK.
+The SDK DOM suites run against a live jsdom document, which is a DOM implementation, not a browser. jsdom implements `setCustomValidity` and the constraint API well enough to drive the SDK's real code path, but it does **not** compute `badInput`, and it is not proof of browser behaviour. `sdk-validity-flow.test.ts` therefore mocks the `badInput` validity state (installing both `validity` and `checkValidity` so the two agree) and says so in the test; the real-browser observation is recorded separately in `docs/browser-evidence.md`, captured with headless Chromium against the built SDK.
 
 Coverage is concentrated on the pure, high-risk core: detection rules, dispatcher selection, both parser families, the crypto boundary, and the ElementId hash contract. Those are the components where a silent regression would degrade the product invisibly instead of breaking loudly.
 
-**What is not covered:** there is no integration test that exercises `/api/events` end to end against a real database, there are no browser or E2E tests (Playwright is a crawling dependency here, not a test runner), and the dashboard's React pages are untested.
+**What is not covered:** there is no integration test that exercises `/api/events` end to end against a real database, the Chromium test uses an ingest fixture rather than a real database, and the dashboard's React pages are untested.
 
-CI (`.github/workflows/ci.yml`) runs on push to main and on every PR: Node 22 and pnpm 10 with a cached store, then `prisma generate`, `typecheck`, `lint`, `test`, both SDK bundles (failing if the checked-in copies are stale), and a production `pnpm build`. There is no Postgres service container, which is consistent with the suite being unit-level only.
+CI (`.github/workflows/ci.yml`) runs on push to main and on every PR: Node 22 and pnpm 10 with a cached store, then `prisma generate`, `typecheck`, `lint`, `test`, both SDK bundles (failing if the checked-in copies are stale), and a production `pnpm build`. There is no Postgres service container, the browser flow uses an ingest fixture.
 
 ## Status
 
@@ -276,7 +276,7 @@ CI (`.github/workflows/ci.yml`) runs on push to main and on every PR: Node 22 an
 | SaaS shell | Built | magic-link auth, onboarding wizard, 11 dashboard pages, usage metering, encrypted key storage |
 | Scheduled workers | Built | three Vercel crons behind `CRON_SECRET` |
 | Event type persistence | Partial | SDK emits 15 types, the `EventType` enum stores 7 |
-| Integration / E2E tests | Not built | unit tests only |
+| Real database integration | Not built | Chromium capture and dispatch are exercised with an ingest fixture |
 | Monorepo split | Not planned | single app; workspace file exists only for a build flag |
 
 ## About this public copy

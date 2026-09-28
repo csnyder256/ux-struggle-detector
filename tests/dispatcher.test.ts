@@ -486,7 +486,7 @@ describe('dispatchInterventionsWithRows', () => {
       { safeMode: false },
     )
     expect(out.length).toBe(1)
-    expect(out[0]?.rowId).toMatch(/^iv_[0-9a-f]{1,16}$/)
+    expect(out[0]?.rowId).toMatch(/^iv_[0-9a-f]{64}$/)
     expect(out[0]?.variantGroup).toBe('RAGE_CLICK')
     expect(typeof out[0]?.variantIndex).toBe('number')
   })
@@ -865,5 +865,34 @@ describe('cached variants (pre-computed interventions)', () => {
       { safeMode: false, cachedVariants: cached },
     )
     expect(out[0]?.helpCopy).toBe('Make sure it looks like name@example.com.')
+  })
+})
+
+
+describe('organization-scoped feedback', () => {
+  it('keeps the population row in the SDK response and isolates organizations', () => {
+    const detection = det('RAGE_CLICK')
+    const a = dispatchInterventions([detection], { safeMode: false, orgId: 'org-a' })[0]!
+    const b = dispatchInterventions([detection], { safeMode: false, orgId: 'org-b' })[0]!
+    expect(a.rowId).toMatch(/^iv_[0-9a-f]{64}$/)
+    expect(a.rowId).not.toBe(b.rowId)
+    const nextSession = { ...detection, sessionId: 'another-session' }
+    // A single cached variant makes the population key independent of session selection.
+    const cachedVariants = new Map([[`${E1}|RAGE_CLICK`, [{ type: 'TOOLTIP' as const, copy: 'Help' }]]])
+    const first = dispatchInterventions([detection], { safeMode: false, orgId: 'org-a', cachedVariants })[0]!
+    const second = dispatchInterventions([nextSession], { safeMode: false, orgId: 'org-a', cachedVariants })[0]!
+    expect(first.rowId).toBe(second.rowId)
+    expect(first.id).not.toBe(second.id)
+  })
+
+  it('learns only from the owning organization’s population rows', () => {
+    const stats = new Map([
+      [populationRowIdForTest('LOOP', E1, 0, 'org-a'), { impressions: 100, successes: 99 }],
+      [populationRowIdForTest('LOOP', E1, 1, 'org-a'), { impressions: 100, successes: 1 }],
+      [populationRowIdForTest('LOOP', E1, 0, 'org-b'), { impressions: 100, successes: 1 }],
+      [populationRowIdForTest('LOOP', E1, 1, 'org-b'), { impressions: 100, successes: 99 }],
+    ])
+    expect(pickVariantBanditForTest('s', 'LOOP', E1, 2, stats, 0, 30, () => 0.5, 'org-a')).toBe(0)
+    expect(pickVariantBanditForTest('s', 'LOOP', E1, 2, stats, 0, 30, () => 0.5, 'org-b')).toBe(1)
   })
 })

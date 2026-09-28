@@ -89,8 +89,8 @@ export function renderIntervention(d: DispatchedIntervention): void {
   // session-keyed id increments nothing and writes no impression row, so the
   // bandit never sees the feedback and the A/B rate stays misleadingly empty.
   const outcomeId = d.rowId ?? d.id
-  if (shown.has(outcomeId)) return
-  shown.add(outcomeId)
+  if (shown.has(d.id)) return
+  shown.add(d.id)
   reportOutcome(outcomeId, 'shown')
 
   const target = d.targetElementId ? findElement(d.targetElementId) : null
@@ -190,7 +190,7 @@ function autoCleanup(el: HTMLElement, ms: number, onRemove?: () => void): void {
  * element has left the document, and functions return the teardown for the
  * callers that know they are done with it (an auto-dismiss, a close button).
  */
-function attachEscDismiss(el: HTMLElement, interventionId?: string): () => void {
+function attachEscDismiss(el: HTMLElement, interventionId?: string, onRemove?: () => void): () => void {
   const onKey = (e: KeyboardEvent) => {
     if (e.key !== 'Escape') return
     if (!document.body.contains(el)) {
@@ -198,6 +198,7 @@ function attachEscDismiss(el: HTMLElement, interventionId?: string): () => void 
       return
     }
     if (interventionId) reportOutcome(interventionId, 'dismissed')
+    onRemove?.()
     el.remove()
     document.removeEventListener('keydown', onKey, true)
   }
@@ -305,7 +306,7 @@ function renderOverlay(
   const body = document.createElement('div')
   body.style.flex = '1'
   const text = document.createElement('div')
-  text.innerHTML = decodeHtml(d.copy)
+  text.textContent = decodeHtml(d.copy)
   body.appendChild(text)
   // Secondary help copy from LLM enrichment.
   if (d.helpCopy) {
@@ -376,18 +377,8 @@ function renderSpotlight(target: HTMLElement | null, d: DispatchedIntervention, 
   const rect = target.getBoundingClientRect()
   // Full-screen dimmer with a hole punched out for the target.
   //
-  // The hole is described in `polygon()` percentages, not pixels. A basic
-  // shape in a `clip-path` is sized against the box it is applied to, and this
-  // box is `position: fixed; inset: 0` - so a coordinate of `640px` means 640px
-  // *from the overlay's own left edge*, which for a fixed overlay is the
-  // viewport's left edge only by coincidence. The earlier revision wrote four
-  // viewport pixels into a viewport-wide box, and on a document whose scroll
-  // height exceeded the viewport the box grew while the hole did not: the two
-  // clipped-out point pairs landed outside the box, the paths did not close,
-  // and the `clip-path` resolved to nothing at all. The overlay then covered
-  // the element it was supposed to reveal, and the user saw a dark screen with
-  // no explanation. Percentages cannot drift like that: they are the same
-  // fraction of the box whatever the box's size, and the viewport is the box.
+  // Normalize viewport coordinates and use an explicit even-odd fill rule
+  // so the inner polygon cuts a hole in the fixed viewport overlay.
   const pct = (px: number, extent: number): string =>
     `${extent > 0 ? round((px / extent) * 100) : 0}%`
   const { innerWidth: vw, innerHeight: vh } = window
@@ -439,7 +430,7 @@ function renderTooltip(target: HTMLElement | null, d: DispatchedIntervention, tt
   const tip = document.createElement('div')
   tip.className = '__sh_card__'
   tip.setAttribute('role', 'tooltip')
-  tip.innerHTML = decodeHtml(d.copy)
+  tip.textContent = decodeHtml(d.copy)
   Object.assign(tip.style, {
     position: 'fixed',
     background: '#111827',
@@ -505,7 +496,7 @@ function renderModal(d: DispatchedIntervention, outcomeId: string = d.id) {
   }
   const body = document.createElement('div')
   body.id = '__sh_modal_body__'
-  body.innerHTML = decodeHtml(d.copy)
+  body.textContent = decodeHtml(d.copy)
   body.style.fontSize = '14px'
   body.style.lineHeight = '1.5'
   card.appendChild(body)
@@ -545,7 +536,7 @@ function renderModal(d: DispatchedIntervention, outcomeId: string = d.id) {
   teardownFocus = trapFocus(card)
   close.focus()
   // ESC key closes.
-  teardownEsc = attachEscDismiss(backdrop, outcomeId)
+  teardownEsc = attachEscDismiss(backdrop, outcomeId, () => teardownFocus?.())
 }
 
 function renderBanner(d: DispatchedIntervention, ttl: number, outcomeId: string = d.id) {
@@ -583,7 +574,7 @@ function renderBanner(d: DispatchedIntervention, ttl: number, outcomeId: string 
   } as Partial<CSSStyleDeclaration>)
   const text = document.createElement('div')
   text.style.flex = '1'
-  text.innerHTML = decodeHtml(d.copy)
+  text.textContent = decodeHtml(d.copy)
   banner.appendChild(text)
   const detachEsc = attachEscDismiss(banner, outcomeId)
   banner.appendChild(makeDismissBtn(() => removeWith(banner, detachEsc), outcomeId))
@@ -599,7 +590,7 @@ function renderInlineHint(target: HTMLElement | null, d: DispatchedIntervention,
   const rect = target.getBoundingClientRect()
   const hint = document.createElement('div')
   hint.className = '__sh_card__'
-  hint.innerHTML = decodeHtml(d.copy)
+  hint.textContent = decodeHtml(d.copy)
   Object.assign(hint.style, {
     position: 'fixed',
     background: '#fef3c7',
@@ -704,8 +695,8 @@ function renderAnnounce(d: DispatchedIntervention) {
 }
 
 function decodeHtml(s: string): string {
-  // Server may send curly-quote entities - decode them. For safety, escape
-  // anything that looks like raw HTML before we set innerHTML.
+  // Decode the library's typography entities. Dynamic copy is assigned to
+  // textContent, so validation messages never become executable markup.
   return s
     .replace(/&rsquo;/g, '’')
     .replace(/&lsquo;/g, '‘')

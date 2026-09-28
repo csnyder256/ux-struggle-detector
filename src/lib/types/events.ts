@@ -137,8 +137,8 @@ export interface DispatchedIntervention {
    *
    * The wire payload always carries it: the SDK's `id` is session-keyed
    * (`iv_` + hash of session/type/element/variant) so it is stable per browser
-   * session but identical across sessions, while the row is population-keyed
-   * (`iv_` + hash of type/element/variant) so it aggregates impressions across
+   * session and differs across sessions, while the row is population-keyed
+   * (`iv_` + SHA-256 of org/type/element/variant) so it aggregates impressions across
    * every session. Server code strips both this and `variantGroup` /
    * `variantIndex` only from the *dashboard* view, never from the SDK response.
    */

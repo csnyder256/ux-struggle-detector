@@ -375,3 +375,19 @@ function instrumentKeydownListeners(doc: Document): void {
 function countKeydownListeners(): number {
   return (harness.doc as unknown as { __shKeydown?: Set<EventListener> }).__shKeydown?.size ?? 0
 }
+
+
+it('renders untrusted copy as text and keeps entity typography', () => {
+  render(intervention({ copy: '<img src=x onerror="alert(1)"> &rsquo;help&rsquo;' }))
+  const root = harness.doc.getElementById('__struggle_heal_root__') ?? harness.doc.body
+  expect(root.querySelector('img')).toBeNull()
+  expect(root.textContent).toContain('<img src=x onerror="alert(1)"> ’help’')
+})
+
+it('deduplicates session ids independently of population outcome ids', () => {
+  render(intervention({ id: 'session-first' }))
+  render(intervention({ id: 'session-first' }))
+  render(intervention({ id: 'session-second' }))
+  expect(harness.outcomes.filter((o) => o.outcome === 'shown')).toHaveLength(2)
+  expect(harness.outcomes.every((o) => o.id === 'iv_population_row')).toBe(true)
+})
