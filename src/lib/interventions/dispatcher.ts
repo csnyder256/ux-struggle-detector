@@ -227,7 +227,9 @@ export function dispatchInterventionsWithRows(
     // the failing field, then any capture for this element.
     const runtimeValidityMessage =
       (det.elementId ? ctx.validationMessageByElement?.get(det.elementId) : null) ?? null
-    const validationHint = describeValidation(validation, runtimeValidityMessage)
+    const validationHint = asSentenceFragment(
+      describeValidation(validation, runtimeValidityMessage),
+    )
     const rsem = sessRoute ? ctx.routeSemantic?.get(sessRoute) : undefined
     const routePurpose = rsem?.purpose ?? ''
     const journeyStage = rsem?.journeyStage ?? ''
@@ -450,6 +452,21 @@ function describeValidation(
   // "a valid format" do not read as "needs a valid format, a valid format".
   const unique = Array.from(new Set(parts))
   return unique.length > 0 ? `needs ${unique.join(', ')}` : ''
+}
+
+/**
+ * Make a validation hint safe to splice into a template sentence.
+ *
+ * A browser `validationMessage` and a page's own `setCustomValidity` string
+ * normally END with a period ("... not a VAT ID."), and the templates that use
+ * `{validation}` ("{label} {validation}.") add their own. Splicing one into the
+ * other rendered "Tax ID That is a card number, not a VAT ID.." - a doubled
+ * period the user actually sees. Strip trailing sentence punctuation from the
+ * hint; the template owns the punctuation, exactly as it does for every other
+ * value it interpolates.
+ */
+function asSentenceFragment(hint: string): string {
+  return hint.replace(/[.!?]+\s*$/, '')
 }
 
 /** Deterministic variant pick keyed by session + struggle type (cold start). */

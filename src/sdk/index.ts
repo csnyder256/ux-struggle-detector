@@ -512,9 +512,25 @@ function initInner(opts: InitOptions): void {
   let reportedThisStretch = false
   /** The stretch length already reported in the current quiet period. */
   let lastReportedMs = 0
+  /**
+   * Identity of the quiet stretch currently in progress. Every DWELL report
+   * for one stretch carries the same value, and a resumed interaction mints a
+   * new one. The server's per-element dwell baseline groups reports by this id
+   * and takes ONE sample per stretch, so a single 120s stare that was reported
+   * 111 times does not out-vote 111 separate 10s stares. Distinct ms values
+   * are not a substitute: the reports of one stretch are all distinct by
+   * construction, which is exactly what made counting rows look safe.
+   */
+  let stretchSeq = 0
+  let stretchId = `st_${Date.now().toString(36)}_0`
   function markActivity(): void {
     lastInteractTs = Date.now()
     reportedThisStretch = false
+    // A new stretch gets a new id; the next report of THIS stretch is the
+    // first of its life, so `lastReportedMs` resets with it.
+    stretchSeq += 1
+    lastReportedMs = 0
+    stretchId = `st_${Date.now().toString(36)}_${stretchSeq}`
   }
   document.addEventListener(
     'mousemove',
@@ -530,7 +546,9 @@ function initInner(opts: InitOptions): void {
     // reset the timer, or a two-minute stare would be reported as 10s.
     const stretchMs = reportedThisStretch ? lastReportedMs + quietMs : quietMs
     if (stretchMs >= DWELL_REPORT_MS) {
-      void emit('DWELL', lastInteractEl, { ms: stretchMs })
+      // `stretch` identifies the quiet stretch this report belongs to, so the
+      // server can count one sample per stretch instead of one per heartbeat.
+      void emit('DWELL', lastInteractEl, { ms: stretchMs, stretch: stretchId })
       // Report the quiet stretch once, then carry on measuring it.
       lastReportedMs = stretchMs
       lastInteractTs = Date.now()

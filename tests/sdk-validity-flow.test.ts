@@ -1,10 +1,19 @@
 /**
  * Custom validity and numeric constraints, through the REAL flow.
  *
- * These tests drive a live jsdom input: the page calls the browser's actual
- * `setCustomValidity()` (and the real `badInput` / `stepMismatch` validity
- * states), the SDK captures the failure off the element, the ingest schema
- * carries it, and the dispatcher renders it into intervention copy.
+ * These tests drive a live jsdom input: the page calls jsdom's actual
+ * `setCustomValidity()` (which jsdom implements as spec'd), the SDK captures the
+ * failure off the element, the ingest schema carries it, and the dispatcher
+ * renders it into intervention copy.
+ *
+ * jsdom is a DOM implementation, not a browser. It implements
+ * `setCustomValidity` and `customError`, but it does NOT compute `badInput`
+ * (the browser state for a value that cannot be parsed as a number). The
+ * `badInput` case below therefore installs a mocked validity state AND the
+ * matching `checkValidity()` result, so the mock agrees with itself - it proves
+ * the SDK's handling of a reported `badInput`, not that a browser sets the flag.
+ * The real-browser observation lives in docs/browser-evidence.md (headless
+ * Chromium). Prose here says "jsdom reports", never "the browser does".
  *
  * A static `setCustomValidity="..."` JSX attribute is NOT the browser's method
  * and proves nothing, so nothing here uses one.
@@ -14,7 +23,7 @@ import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { JSDOM } from 'jsdom'
 import { dispatchInterventions } from '@/lib/interventions/dispatcher'
 import { RuntimeEventSchemaExport as RuntimeEventSchema } from '@/lib/ingest/schema'
-import type { StruggleDetection } from '@/lib/types/events'
+import type { StruggleDetection, RuntimeEvent } from '@/lib/types/events'
 import type { ElementId } from '@/lib/types/ui-map'
 import { installDom, eventsOf, moveMouse, tick, bootSdk, click } from './helpers/sdk-dom'
 
@@ -49,6 +58,24 @@ function interval(copy: string): string {
   return m ? copy : copy
 }
 
+/**
+ * Let the SDK's async emit chain settle until at least one event matching
+ * `pred` has landed in the buffer, or the tick budget runs out. A fixed single
+ * tick is not enough: `emit` chains through `resolveElementId` (WebCrypto), so
+ * under parallel test load the event can arrive a tick later. Waiting on the
+ * observable keeps the test dependent on the SDK, not on scheduler timing.
+ */
+async function settleUntil(
+  run: { events: RuntimeEvent[] },
+  pred: (e: RuntimeEvent) => boolean,
+  maxTicks = 40,
+): Promise<void> {
+  for (let i = 0; i < maxTicks; i++) {
+    if (run.events.some(pred)) return
+    await tick(1_000)
+  }
+}
+
 describe('runtime setCustomValidity reaches the copy the user sees', () => {
   it('captures the browser message the page set, end to end', async () => {
     const run = await bootSdk('<form><input id="vat" name="vat"></form>')
@@ -62,7 +89,7 @@ describe('runtime setCustomValidity reaches the copy the user sees', () => {
       // event that carries that context.
       input.focus()
       click(input)
-      await tick(1_000)
+      await settleUntil(run, (e) => Boolean(e.element?.validity))
 
       const withValidity = run.events.filter((e) => e.element?.validity)
       expect(withValidity.length, 'the SDK reports the failing field').toBeGreaterThan(0)
@@ -104,7 +131,7 @@ describe('runtime setCustomValidity reaches the copy the user sees', () => {
       expect(input.validity.customError).toBe(false)
       input.focus()
       click(input)
-      await tick(1_000)
+      await settleUntil(run, (e) => Boolean(e.element?.validity))
 
       const withValidity = run.events.filter((e) => e.element?.validity)
       expect(withValidity.length).toBeGreaterThan(0)
@@ -116,14 +143,16 @@ describe('runtime setCustomValidity reaches the copy the user sees', () => {
     }
   })
 
-  it('reads a real badInput state when the field actually fails validation', async () => {
+  it('reports badInput when the validity state says so (jsdom cannot compute it, so it is mocked)', async () => {
     const run = await bootSdk('<form><input id="qty" name="qty" type="number"></form>')
     try {
       const input = run.doc.getElementById('qty') as HTMLInputElement
-      // `badInput` is set by the browser when the typed value cannot be parsed
-      // as a number. jsdom does not compute it, so install both the validity
-      // state AND the matching `checkValidity()` result, which is what the SDK
-      // actually consults - overriding one without the other proves nothing.
+      // `badInput` is set by a real browser when the typed value cannot be
+      // parsed as a number. jsdom does not compute it, so install both the
+      // validity state AND the matching `checkValidity()` result, which is what
+      // the SDK actually consults - overriding one without the other proves
+      // nothing. This pins the SDK's handling of a reported flag; the real
+      // browser observation is in docs/browser-evidence.md.
       const bad = {
         valueMissing: false,
         typeMismatch: false,
@@ -146,7 +175,7 @@ describe('runtime setCustomValidity reaches the copy the user sees', () => {
 
       input.focus()
       click(input)
-      await tick(1_000)
+      await settleUntil(run, (e) => Boolean(e.element?.validity))
 
       const withValidity = run.events.filter((e) => e.element?.validity)
       expect(withValidity.length).toBeGreaterThan(0)
@@ -169,7 +198,12 @@ describe('runtime setCustomValidity reaches the copy the user sees', () => {
       expect(input.checkValidity()).toBe(true)
       input.focus()
       click(input)
-      await tick(1_000)
+      // Wait for the click to actually land, then assert it carries no validity
+      // flags - waiting on a fixed tick would pass trivially if the event
+      // simply had not arrived yet.
+      await settleUntil(run, (e) => e.eventType === 'CLICK')
+      const clicks = run.events.filter((e) => e.eventType === 'CLICK')
+      expect(clicks.length).toBeGreaterThan(0)
       const withValidity = run.events.filter((e) => e.element?.validity)
       expect(withValidity).toHaveLength(0)
     } finally {
@@ -217,5 +251,23 @@ describe('numeric constraints render honest, usable guidance', () => {
     const copy = dispatched[0]!.copy
     expect(copy).toMatch(/required/)
     expect(copy).not.toMatch(/valid format/)
+  })
+
+  it('does not double the sentence period when the page message already ends in one', () => {
+    // A real browser `validationMessage` ends with a period, and the template
+    // ("{label} {validation}.") adds its own - the browser evidence run
+    // rendered "Tax ID That is a card number, not a VAT ID.." before this was
+    // normalised.
+    const dispatched = dispatchInterventions([validationDetection()], {
+      safeMode: false,
+      elementLabels: new Map([[E1, 'Tax ID']]),
+      validationMessageByElement: new Map([
+        [E1, 'That is a card number, not a VAT ID.'],
+      ]),
+    })
+    expect(dispatched).toHaveLength(1)
+    const copy = dispatched[0]!.copy
+    expect(copy).toContain('That is a card number, not a VAT ID.')
+    expect(copy).not.toMatch(/\.\./)
   })
 })

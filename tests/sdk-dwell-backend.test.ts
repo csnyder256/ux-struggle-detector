@@ -18,7 +18,10 @@
  * through a single quiet stretch (so a long or adapted threshold is reachable),
  * and a single quiet stretch is reported once per second only while it lasts -
  * a resumed interaction starts a fresh count rather than re-adding the stretch
- * that was already reported.
+ * that was already reported. Because those heartbeats are still many rows for
+ * one event, each report carries a stretch identity (`meta.stretch`) so the
+ * per-element baseline can count one sample per stretch; the aggregation side of
+ * that contract is proven in tests/baselines-dwell-grouping.test.ts.
  */
 
 import { describe, it, expect, afterEach } from 'vitest'
@@ -30,11 +33,6 @@ afterEach(async () => {
   const { vi } = await import('vitest')
   vi.useRealTimers()
 })
-
-/** Ticked the way a live page ticks, letting the SDK's own 1s timer fire. */
-async function idleFor(ms: number, step = 1_000): Promise<void> {
-  for (let elapsed = 0; elapsed < ms; elapsed += step) await tick(step)
-}
 
 /**
  * Idle until the SDK has actually reported `targets` DWELL events, or the
@@ -163,7 +161,10 @@ describe('DWELL events survive backend long-dwell detection', () => {
     try {
       const cta = run.doc.getElementById('cta')!
       moveMouse(cta)
-      await idleFor(40_000)
+      // Wait until the first stretch has reported the 30s the static rule needs,
+      // so the detection below rests on evidence that is actually long enough -
+      // and on the SDK's observable output, not on a fixed number of ticks.
+      await idleUntilReports(run, 21)
       const firstStretch = dwellEvents(run.events)
       expect(firstStretch.length).toBeGreaterThan(0)
       const elementId = firstStretch[0]!.elementId
@@ -179,31 +180,55 @@ describe('DWELL events survive backend long-dwell detection', () => {
       // the first stretch got. Everything after it belongs to the second
       // stretch and must count from the 10s floor rather than continuing on
       // from the first stretch's total.
+      const beforeResume = dwellEvents(run.events).length
+      const firstStretchId = dwellEvents(run.events)[0]!.meta?.stretch
       moveMouse(cta)
-      await tick(5_000)
-      await idleFor(40_000)
-
-      const all = reported(dwellEvents(run.events))
-      // The first stretch's terminal report is the highest value that is still
-      // immediately preceded by a run of increasing values starting at 10s -
-      // the raced tail report (40s) is the end of that run.
-      let endOfFirst = 0
-      for (let i = 1; i < all.length; i++) {
-        if (all[i]! <= all[i - 1]!) {
-          endOfFirst = i - 1
+      // Five single-second ticks, not one five-second advance: a single advance
+      // can drain several interval callbacks in one batch, so the interaction
+      // and the tick that observes it interleave differently under load. Five
+      // discrete ticks make the resume boundary deterministic.
+      for (let i = 0; i < 5; i++) await tick(1_000)
+      // Wait for a report with a DIFFERENT stretch identity, not for a row
+      // count: the first stretch can add tail reports after the resume, and a
+      // count-based wait is satisfied by those without ever seeing the second
+      // stretch - which is exactly how this test flaked.
+      for (let elapsed = 0; elapsed < 300_000; elapsed += 1_000) {
+        if (
+          dwellEvents(run.events).some((e) => e.meta?.stretch !== firstStretchId)
+        ) {
           break
         }
+        await tick(1_000)
       }
-      expect(endOfFirst, 'the first stretch has reports').toBeGreaterThan(0)
-      expect(all[endOfFirst]).toBeGreaterThanOrEqual(20_000)
 
-      // Everything after it belongs to the second stretch and must count from
-      // the 10s floor rather than continuing on from the first stretch's total.
-      const afterFirst = all.slice(endOfFirst + 1)
-      expect(afterFirst.length, 'the second quiet stretch reports').toBeGreaterThan(0)
-      expect(afterFirst[0], 'the second stretch reports from its own floor').toBe(10_000)
-      // ... and then grows again on its own, to at most the 40s+5s it measured.
-      expect(afterFirst[afterFirst.length - 1]).toBeLessThanOrEqual(45_000)
+      // Group the reports by their stretch identity - the same grouping the
+      // baseline uses - instead of scanning the flat sequence for a decrease.
+      // The ids say what the positional scan was trying to say, without
+      // depending on which side of a tick a boundary report landed.
+      const firstIds = dwellEvents(run.events)
+        .slice(0, beforeResume)
+        .map((e) => e.meta?.stretch)
+      expect(typeof firstStretchId).toBe('string')
+      expect(new Set(firstIds).size, 'the first stretch has one id').toBe(1)
+
+      const byStretch = new Map<string, number[]>()
+      for (const e of dwellEvents(run.events)) {
+        const id = String(e.meta?.stretch)
+        const arr = byStretch.get(id) ?? []
+        arr.push(Number(e.meta?.ms ?? 0))
+        byStretch.set(id, arr)
+      }
+      expect(byStretch.size, 'two quiet stretches are two identities').toBe(2)
+
+      const firstStretchMs = byStretch.get(String(firstStretchId))!
+      expect(Math.max(...firstStretchMs), 'the first stretch grew past 20s').toBeGreaterThanOrEqual(20_000)
+
+      const secondId = [...byStretch.keys()].find((id) => id !== String(firstStretchId))!
+      const secondStretch = byStretch.get(secondId)!
+      // The second stretch counts from its own 10s floor rather than continuing
+      // on from the first stretch's total, and grows on its own from there.
+      expect(Math.min(...secondStretch), 'the second stretch reports from its floor').toBe(10_000)
+      expect(Math.max(...secondStretch)).toBeLessThanOrEqual(45_000)
 
       // Two quiet stretches on one element are one detection per pass:
       // detectStruggles dedupes on (sessionId, elementId, type).
@@ -215,18 +240,29 @@ describe('DWELL events survive backend long-dwell detection', () => {
     }
   })
 
-  it('a single quiet stretch is not re-dated into duplicate baseline rows', async () => {
+  it('a single quiet stretch carries one identity, so it contributes one baseline sample', async () => {
     const run = await bootSdk('<div id="hero">Docs</div>')
     try {
       await idleUntilReports(run, 111)
       const dwell = dwellEvents(run.events)
       const ms = reported(dwell)
-      // Each report covers strictly more quiet time than the last, so no two
-      // rows describe the same stretch and the dwell baseline is not fed the
-      // same idle period twice.
-      const distinct = new Set(ms)
-      expect(distinct.size).toBe(ms.length)
+
+      // Distinct ms values prove nothing about duplication: reports of one
+      // growing stretch are distinct BY CONSTRUCTION (10s, 11s, ... 120s), so
+      // "distinct durations" is compatible with 111 rows describing one event.
+      // The real question is whether the rows can be tied to the same stretch.
       expect(reportsAreMonotonic(ms)).toBe(true)
+
+      // The SDK must stamp one identity across every report of this stretch;
+      // that id is what the server's baseline groups on to take one sample.
+      const stretchIds = new Set(dwell.map((e) => e.meta?.stretch))
+      expect(stretchIds.size).toBe(1)
+      expect(typeof Array.from(stretchIds)[0]).toBe('string')
+
+      // The honest statement of the old claim: the baseline sees ONE sample for
+      // this stretch. (tests/baselines-dwell-grouping.test.ts proves the
+      // aggregation honours it; here we only pin that the id exists and agrees.)
+      expect(ms.length).toBeGreaterThan(1)
     } finally {
       run.stop()
     }

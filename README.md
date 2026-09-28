@@ -6,7 +6,7 @@
 ![TypeScript](https://img.shields.io/badge/typescript-5.6%20strict-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![Next.js](https://img.shields.io/badge/next.js-15%20app%20router-000000?style=flat-square&logo=nextdotjs&logoColor=white)
 ![Prisma](https://img.shields.io/badge/prisma-5%20%2F%20postgres-2D3748?style=flat-square&logo=prisma&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-210%20across%2015%20files-brightgreen?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-220%20across%2018%20files-brightgreen?style=flat-square)
 ![Detection rules](https://img.shields.io/badge/struggle%20rules-40-orange?style=flat-square)
 ![SDK](https://img.shields.io/badge/browser%20SDK-26%20KB%20minified-informational?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
@@ -87,7 +87,7 @@ Every extracted element gets a deterministic ID (`sh_` plus 32 hex chars) from `
 
 There is also a one-line auto-init form: a `<script>` tag carrying `data-org-id` is picked up by `readAutoInitOptions()` (`src/sdk/index.ts:563`), so no second script block is needed.
 
-It captures 15 event types (click, input change, submit, navigation, hover, scroll, dwell, paste, copy, focus, blur, keydown, JS error, validation error, custom), buffers to survive offline, and supports uniform, per-type, and predicate-based sampling. A dwell is checked once a second and reported when the user has been quiet for 10s, so a 15s or 30s idle threshold is detected about when it happens rather than up to half a minute late. Each report carries the quiet stretch it belongs to and grows as that stretch continues, so a long idle can still clear a baseline-raised threshold; a resumed interaction starts a fresh count rather than re-adding a stretch that was already reported.
+It captures 15 event types (click, input change, submit, navigation, hover, scroll, dwell, paste, copy, focus, blur, keydown, JS error, validation error, custom), buffers to survive offline, and supports uniform, per-type, and predicate-based sampling. A dwell is checked once a second and reported when the user has been quiet for 10s, so a 15s or 30s idle threshold is detected about when it happens rather than up to half a minute late. Each report carries the quiet stretch it belongs to (`meta.stretch`) and grows as that stretch continues, so a long idle can still clear a baseline-raised threshold and a resumed interaction starts a fresh stretch. Because one stretch is therefore many rows, the per-element dwell baseline groups by `meta.stretch` and takes one sample per stretch - a single 120s stare must not out-vote 99 separate 10s stares just by having been reported 111 times.
 
 It does not care what the host app is built with. Listeners sit at the document level, so it needs no framework hooks. Navigation is followed through `pushState`, `replaceState` (only when the route changes) and the back/forward buttons. For hash-mode routers (`#/cart`, AngularJS `#!/cart`), the route comes from the fragment, so those screens are not all reported as `/`. Where the browser has the Navigation API, a forward move to a new fragment is kept apart from a real back-button press, so clicking through hash links never reads as back-button thrash. Calling `initSelfHealing()` during a server render is a no-op, so frameworks that render on the server can call it from shared code.
 
@@ -216,7 +216,7 @@ Differs from `readValidation` in `react.ts` only in how the platform attributes 
 
 ## Testing
 
-210 tests across 15 Vitest files.
+220 tests across 18 Vitest files.
 
 | File | Tests | Covers |
 | --- | --- | --- |
@@ -234,7 +234,12 @@ Differs from `readValidation` in `react.ts` only in how the platform attributes 
 | `ingest-schema.test.ts` | 3 | over-long page text is cut, not a rejected batch |
 | `session-payload.test.ts` | 1 | `/api/auth/session` never exposes the session token |
 | `sdk-dwell-backend.test.ts` | 5 | SDK dwell timer driven against a real DOM, its events fed to the real detector |
-| `sdk-validity-flow.test.ts` | 7 | real `setCustomValidity` / `badInput` capture through ingest into rendered copy |
+| `sdk-dwell-stretch-flow.test.ts` | 4 | SDK stretch identity through the wire schema into the real baseline grouping |
+| `baselines-dwell-grouping.test.ts` | 4 | dwell p95 weighted per quiet stretch, not per heartbeat row |
+| `sdk-validity-flow.test.ts` | 8 | runtime `setCustomValidity` capture through ingest into rendered copy |
+| `browser-evidence.test.ts` | 1 | real headless Chromium: browser constraint API, SDK capture, ingest and dispatcher |
+
+The two SDK files run against a live jsdom document, which is a DOM implementation, not a browser. jsdom implements `setCustomValidity` and the constraint API well enough to drive the SDK's real code path, but it does **not** compute `badInput`, and it is not proof of browser behaviour. `sdk-validity-flow.test.ts` therefore mocks the `badInput` validity state (installing both `validity` and `checkValidity` so the two agree) and says so in the test; the real-browser observation is recorded separately in `docs/browser-evidence.md`, captured with headless Chromium against the built SDK.
 
 Coverage is concentrated on the pure, high-risk core: detection rules, dispatcher selection, both parser families, the crypto boundary, and the ElementId hash contract. Those are the components where a silent regression would degrade the product invisibly instead of breaking loudly.
 

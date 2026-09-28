@@ -117,17 +117,43 @@ export async function computeBaselinesForOrg(orgId: string): Promise<BaselineCom
         if (before > 0) hoversBeforeClickPerSession.push(before)
       }
 
-      // Dwell durations from the DWELL events' meta.ms field. DWELLs fire
-      // every ~30s of inactivity from the SDK; the higher percentiles tell
-      // us what's normal for that surface.
-      const dwellMsValues: number[] = []
+      // Dwell durations from the DWELL events' meta.ms field. The SDK reports a
+      // continuing quiet stretch MORE THAN ONCE - it re-reports every second so
+      // an adapted (baseline-raised) threshold stays reachable - and each report
+      // carries the growing length of the stretch it belongs to. A 120s stare
+      // therefore arrives as ~111 rows (10s, 11s, ... 120s).
+      //
+      // Those rows are heartbeats of ONE event, not 111 separate events. Feeding
+      // each to the percentile independently lets a single long idle cast 111
+      // votes against a 10s idle's one vote, so p95 tracks stare length rather
+      // than typical behaviour - the baseline gets padded by exactly the element
+      // that was quiet longest. So group the rows by the stretch they belong to
+      // (SDK meta.stretch) and take ONE sample per stretch: its longest report.
+      //
+      // Legacy rows (written before the identity existed) have no meta.stretch.
+      // Each has no way to be tied to another, so each is its own stretch of the
+      // length it reports - which is the pre-identity behaviour, preserved
+      // rather than guessed at. A row that carries an identity is grouped by it
+      // even when it is the only row for that identity, so a mix of old and new
+      // data degrades one row at a time instead of collapsing.
+      const dwellByStretch = new Map<string, number>()
+      let legacyDwellIndex = 0
       for (const sessEvents of bySession.values()) {
         for (const e of sessEvents) {
           if (e.eventType !== 'DWELL') continue
-          const m = e.meta as { ms?: number } | null
-          if (typeof m?.ms === 'number' && m.ms > 0) dwellMsValues.push(m.ms)
+          const m = e.meta as { ms?: number; stretch?: unknown } | null
+          if (typeof m?.ms !== 'number' || m.ms <= 0) continue
+          const key =
+            typeof m.stretch === 'string' && m.stretch.length > 0
+              ? `stretch:${m.stretch}`
+              : `legacy:${legacyDwellIndex++}`
+          const previous = dwellByStretch.get(key)
+          // The longest report describes the whole stretch; earlier heartbeats
+          // are prefixes of it and contribute nothing on their own.
+          if (previous === undefined || m.ms > previous) dwellByStretch.set(key, m.ms)
         }
       }
+      const dwellMsValues: number[] = Array.from(dwellByStretch.values())
 
       const p95ClicksPerSec =
         clickRates.length > 0 ? percentile(clickRates, 0.95) : null

@@ -106,9 +106,17 @@ export async function bootSdk(html: string, now = 1_700_000_000_000): Promise<Sd
 
   initSelfHealing({ orgId: 'org_test', endpoint: '/api/events', flushIntervalMs: 60_000 })
 
+  // The document the SDK itself will listen on. `initSelfHealing` only touches
+  // the DOM when one exists, and the SDK reads `document` at call time, so this
+  // snapshot is the object events must be dispatched into. Returning it (rather
+  // than re-reading `globalThis.document`, which a later `installDom` could
+  // replace) keeps `run.doc` and the SDK's own view the same object - a
+  // mismatch silently swallows synthetic input, which looked like an SDK bug.
+  const sdkDoc = globalThis.document
+
   return {
     events,
-    doc: globalThis.document,
+    doc: sdkDoc,
     win: globalThis.window as unknown as Window & typeof globalThis,
     stop: () => {
       pushSpy.mockRestore()
@@ -119,24 +127,44 @@ export async function bootSdk(html: string, now = 1_700_000_000_000): Promise<Sd
   }
 }
 
-/** Advance the SDK's virtual clock, letting its timers fire. */
+/**
+ * Advance the SDK's virtual clock, letting its timers fire.
+ *
+ * `advanceTimersByTimeAsync` can deliver more than one 1s interval callback for
+ * a single advance depending on how the fake clock drains, and the SDK's emit
+ * path is promise-chained (element IDs hash through WebCrypto). Draining the
+ * microtask queue after the advance makes one `tick(1000)` mean "the SDK has
+ * settled its work for one more second", so callers can reason about a tick
+ * count instead of about the scheduler's internal batching.
+ */
 export async function tick(ms: number): Promise<void> {
   await vi.advanceTimersByTimeAsync(ms)
+  // Let every queued microtask (emit chain, hashing) run to completion.
+  for (let i = 0; i < 5; i++) await Promise.resolve()
 }
 
-/** A real mousemove through the SDK's own listener. */
+/**
+ * A real mousemove through the SDK's own listener.
+ *
+ * The event is constructed from the TARGET's own document view, not from
+ * `globalThis`, so a mousemove can never be built against one jsdom window and
+ * dispatched into another. Doing that silently fails to reach the SDK's
+ * document-level listener, which is what made a resumed-interaction test flake
+ * on a loaded box: the interaction never registered and the quiet stretch
+ * looked like it had never been interrupted.
+ */
 export function moveMouse(target?: Element | null): void {
   const el = target ?? globalThis.document.body
+  const view = el.ownerDocument.defaultView ?? globalThis.window
   el.dispatchEvent(
-    new globalThis.window.MouseEvent('mousemove', { bubbles: true, cancelable: true }),
+    new view.MouseEvent('mousemove', { bubbles: true, cancelable: true }),
   )
 }
 
-/** A real click through the SDK's own listener. */
+/** A real click through the SDK's own listener (same view rule as moveMouse). */
 export function click(el: Element): void {
-  el.dispatchEvent(
-    new globalThis.window.MouseEvent('click', { bubbles: true, cancelable: true }),
-  )
+  const view = el.ownerDocument.defaultView ?? globalThis.window
+  el.dispatchEvent(new view.MouseEvent('click', { bubbles: true, cancelable: true }))
 }
 
 export function eventsOf(events: RuntimeEvent[], type: string): RuntimeEvent[] {

@@ -1184,9 +1184,14 @@ var ClarusHeal = (() => {
     const DWELL_REPORT_MS = 1e4;
     let reportedThisStretch = false;
     let lastReportedMs = 0;
+    let stretchSeq = 0;
+    let stretchId = `st_${Date.now().toString(36)}_0`;
     function markActivity() {
       lastInteractTs = Date.now();
       reportedThisStretch = false;
+      stretchSeq += 1;
+      lastReportedMs = 0;
+      stretchId = `st_${Date.now().toString(36)}_${stretchSeq}`;
     }
     document.addEventListener(
       "mousemove",
@@ -1199,7 +1204,7 @@ var ClarusHeal = (() => {
       const quietMs = Date.now() - lastInteractTs;
       const stretchMs = reportedThisStretch ? lastReportedMs + quietMs : quietMs;
       if (stretchMs >= DWELL_REPORT_MS) {
-        void emit("DWELL", lastInteractEl, { ms: stretchMs });
+        void emit("DWELL", lastInteractEl, { ms: stretchMs, stretch: stretchId });
         lastReportedMs = stretchMs;
         lastInteractTs = Date.now();
         reportedThisStretch = true;
