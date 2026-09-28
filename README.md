@@ -16,7 +16,7 @@ Built under the product name **Clarus Heal**. It maps a customer's web app UI, e
 Three pillars:
 
 1. **Map the UI first.** Framework detection across 46 registry entries in 22 families, a Babel AST parser for React and Preact, a universal template scanner for everything else, plus an LLM pass that gives each element a semantic name and intent.
-2. **Watch from the browser.** A dependency-free SDK (about 1,740 lines, 26 KB minified) capturing 15 event types with client-side PII masking, offline buffering, and sampling.
+2. **Watch from the browser.** A dependency-free SDK (1,919 lines, 27 KB minified) capturing 15 event types with client-side PII masking, offline buffering, and sampling.
 3. **Decide and intervene server-side.** 40 detection rules over hydrated session history, then a bandit-driven dispatcher that returns an overlay, tooltip, or hint inline.
 
 ---
@@ -72,7 +72,7 @@ Every extracted element gets a deterministic ID (`sh_` plus 32 hex chars) from `
 
 ### Pillar 2: the browser SDK
 
-`src/sdk/` is nine files, roughly 1,740 lines, zero runtime dependencies, bundled by esbuild into an IIFE at `public/sdk.min.js` (26,166 bytes; the unminified `sdk.js` is 46,488).
+`src/sdk/` is nine files, 1,919 lines, zero runtime dependencies, bundled by esbuild into an IIFE at `public/sdk.min.js` (26,773 bytes; the unminified `sdk.js` is 48,392).
 
 ```html
 <script src="https://your-deployment/sdk.min.js"></script>
@@ -85,9 +85,11 @@ Every extracted element gets a deterministic ID (`sh_` plus 32 hex chars) from `
 </script>
 ```
 
-There is also a one-line auto-init form: a `<script>` tag carrying `data-org-id` is picked up by `readAutoInitOptions()` (`src/sdk/index.ts:563`), so no second script block is needed.
+There is also a one-line auto-init form: a `<script>` tag carrying `data-org-id` is picked up by `readAutoInitOptions()` (`src/sdk/index.ts:683`), so no second script block is needed.
 
 It captures 15 event types (click, input change, submit, navigation, hover, scroll, dwell, paste, copy, focus, blur, keydown, JS error, validation error, custom), buffers to survive offline, and supports uniform, per-type, and predicate-based sampling. A dwell is checked once a second and reported when the user has been quiet for 10s, so a 15s or 30s idle threshold is detected about when it happens rather than up to half a minute late. Each report carries the quiet stretch it belongs to (`meta.stretch`) and grows as that stretch continues, so a long idle can still clear a baseline-raised threshold and a resumed interaction starts a fresh stretch. Because one stretch is therefore many rows, the per-element dwell baseline groups by `meta.stretch` and takes one sample per stretch - a single 120s stare must not out-vote 99 separate 10s stares just by having been reported 111 times.
+
+A `DWELL` names the element the user was last *interacting* with - a click, a typed field, a submit - and only falls back to the element the pointer was left hovering when there is no interaction to name. That ordering matters more than it looks: the server keys both the per-element `p95DwellMs` baseline and the intervention target on the id the dwell carries, so attributing a quiet stretch to whatever the mouse happened to be resting on does not merely mislabel a row - it applies an adapted threshold to an element the user was never stuck on. Hovers are emitted with a `null` element id for the same reason, and the hover is held aside until a report is actually due, so a pointer gliding across the page mid-stretch cannot steal the attribution.
 
 It does not care what the host app is built with. Listeners sit at the document level, so it needs no framework hooks. Navigation is followed through `pushState`, `replaceState` (only when the route changes) and the back/forward buttons. For hash-mode routers (`#/cart`, AngularJS `#!/cart`), the route comes from the fragment, so those screens are not all reported as `/`. Where the browser has the Navigation API, a forward move to a new fragment is kept apart from a real back-button press, so clicking through hash links never reads as back-button thrash. Calling `initSelfHealing()` during a server render is a no-op, so frameworks that render on the server can call it from shared code.
 
@@ -95,11 +97,17 @@ Honest wrinkle: **the SDK emits 15 event types; the Prisma `EventType` enum pers
 
 **The PII scrubber runs before anything leaves the page.** `src/sdk/scrubber.ts` holds 15 regex patterns in `DEFAULT_PATTERNS`, masking emails, credit-card-shaped digit runs, US SSNs, US and international phone numbers, IBANs, IPv4 and IPv6 addresses, JWTs, AWS access key IDs, GitHub tokens, Stripe keys, and Anthropic/OpenAI-shaped keys, with customer-supplied extra patterns merged in. The masking happens client-side by design: a scrubber that runs on the server has already lost.
 
-12 of the 15 `InterventionType` values have an SDK renderer. `DOM`, `BEHAVIOR` and `AUTO_FIX` have none, by design. `TOUR` is a stub: it renders as a modal, because multi-step `TourConfig` steps are not populated by the dispatcher yet (`src/sdk/renderers.ts:553`).
+12 of the 15 `InterventionType` values have an SDK renderer. `DOM`, `BEHAVIOR` and `AUTO_FIX` have none, by design. `TOUR` is a stub: it renders as a modal, because multi-step `TourConfig` steps are not populated by the dispatcher yet (`src/sdk/renderers.ts:623`).
+
+Every renderer draws inline-styled DOM under one root container and works out its own geometry with `getBoundingClientRect()`. Three properties of that fall out of the tests in `sdk-renderers.test.ts`, and each of them was a defect before it was a property:
+
+- **Anchored panels stay inside the viewport.** `TOOLTIP`, `INLINE_HINT` and `ARROW` place themselves relative to their target, and clamp into the viewport when that target sits at an edge. An unclamped placement renders off-screen, which a user cannot tell apart from an intervention that never rendered at all.
+- **`SPOTLIGHT` describes its hole in percentages of the overlay box, never in viewport pixels.** A basic shape in a `clip-path` resolves against the box it is applied to, and this box is `position: fixed; inset: 0`. Pixel coordinates would therefore be measured from the overlay's own origin - the same origin as the viewport only by coincidence - so the hole could land outside the box, the subpaths would not close, and the `clip-path` would resolve to nothing, leaving the dimmer painted over the very element it exists to reveal. The shape uses `evenodd` with the outer rectangle first and the hole second.
+- **Outcome events carry the persisted row id, not the session-keyed render id.** The dispatcher keeps two: `id`, session-keyed, for in-browser dedup; and `rowId`, population-keyed, which the `Intervention` row is upserted under. `/api/events` resolves an outcome with `prisma.intervention.update({ where: { id: iid } })` against the row, so reporting the session-keyed id increments nothing and writes no impression - the counts the bandit learns from stay at zero. The type carries `rowId` as optional, and the SDK falls back to `id` for a locally rendered intervention (its own rage-click fallback) that no row was ever written for.
 
 ### Pillar 3: detection and intervention
 
-`src/app/api/events/route.ts` (714 lines) is the hot path. Per batch it authenticates the org against a hashed ingest key, Zod-validates against a versioned wire schema (`EVENT_SCHEMA_VERSION` is 3 and versions 1 and 2 are still accepted, so old cached SDK bundles in customers' browsers keep working through a rollout), persists, hydrates up to 1,000 stored events from a 5-minute lookback for the sessions in the batch, loads per-element baselines, runs the detector, records outcomes from prior impressions, and dispatches interventions inline.
+`src/app/api/events/route.ts` (639 lines) is the hot path. Per batch it authenticates the org against a hashed ingest key, Zod-validates against a versioned wire schema (`EVENT_SCHEMA_VERSION` is 3 and versions 1 and 2 are still accepted, so old cached SDK bundles in customers' browsers keep working through a rollout), persists, hydrates up to 1,000 stored events from a 5-minute lookback for the sessions in the batch, loads per-element baselines, runs the detector, records outcomes from prior impressions, and dispatches interventions inline.
 
 **Idempotent ingest by construction.** A `(orgId, idempotencyKey)` unique index plus `createMany({ skipDuplicates: true })` means the SDK offline replay buffer can retry as aggressively as it likes with zero server-side dedup logic.
 
@@ -137,11 +145,11 @@ The three templates whose copy is only useful if it names the page - the `LOOP` 
 | --- | --- | --- |
 | `src/lib/struggle/detect.ts` | 1,182 | the 40 detection rules |
 | `src/lib/parsers/react.ts` | 797 | Babel JSX extraction |
-| `src/app/api/events/route.ts` | 714 | ingest, hydrate, detect, dispatch |
+| `src/app/api/events/route.ts` | 639 | ingest, hydrate, detect, dispatch |
 | `src/lib/parsers/universal-html.ts` | 703 | template scan for non-React families |
 | `prisma/schema.prisma` | 666 | 23 models, 10 enums |
-| `src/sdk/index.ts` | 651 | SDK capture loop and init |
-| `src/sdk/renderers.ts` | 640 | 12 intervention renderers |
+| `src/sdk/index.ts` | 771 | SDK capture loop and init |
+| `src/sdk/renderers.ts` | 719 | 12 intervention renderers |
 | `src/lib/parsers/registry.ts` | 609 | 46 framework entries, 22 families |
 | `src/lib/interventions/dispatcher.ts` | 523 | variant selection and gating |
 
@@ -200,7 +208,7 @@ src/
     enrichment/        LLM passes over elements and routes
     providers/         ModelProvider interface + anthropic / openai
     crypto/ auth/ usage/ github/ db/ access.ts
-  sdk/                 dependency-free browser SDK (9 files, ~1,740 LOC)
+  sdk/                 dependency-free browser SDK (9 files, 1,919 LOC)
   components/          hand-written shadcn-style primitives (no Radix dependency)
 prisma/                schema.prisma, 4 applied migrations
 tests/                 14 Vitest files, 191 tests
@@ -208,7 +216,7 @@ scripts/               setup.sh, setup.ps1
 public/                sdk.js, sdk.min.js (checked-in esbuild output), demo/
 ```
 
-20,493 lines of TypeScript and TSX across 115 files in `src/` and `tests/`. Dashboard reads go through server components and mutations through inline server actions; there is deliberately no REST layer for the dashboard, only for SDK ingest and webhooks.
+22,032 lines of TypeScript and TSX across 125 files in `src/` and `tests/`. Dashboard reads go through server components and mutations through inline server actions; there is deliberately no REST layer for the dashboard, only for SDK ingest and webhooks.
 
 The four migration directory names read as the project's phase history: `init`, `expand_enums`, `platform_config_allowlists`, `phase_25_events_and_sampling`.
 
