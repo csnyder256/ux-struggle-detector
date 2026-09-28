@@ -80,15 +80,24 @@ function root(): HTMLElement {
 }
 
 export function renderIntervention(d: DispatchedIntervention): void {
-  if (shown.has(d.id)) return
-  shown.add(d.id)
-  reportOutcome(d.id, 'shown')
+  // The id the SDK reports outcomes with has to be the id the server persisted,
+  // because the outcome handler in `/api/events` looks the row up by exactly
+  // that value (`prisma.intervention.update({ where: { id: iid } })`). The
+  // dispatcher deliberately keeps two ids: a session-keyed one for in-browser
+  // dedup and a population-keyed `rowId` that the Intervention row is upserted
+  // under, and only the row id exists in the database. Reporting the
+  // session-keyed id increments nothing and writes no impression row, so the
+  // bandit never sees the feedback and the A/B rate stays misleadingly empty.
+  const outcomeId = d.rowId ?? d.id
+  if (shown.has(outcomeId)) return
+  shown.add(outcomeId)
+  reportOutcome(outcomeId, 'shown')
 
   const target = d.targetElementId ? findElement(d.targetElementId) : null
   // Watch for the success signal - user clicks the target within 30s.
   if (target) {
     const handler = () => {
-      reportOutcome(d.id, 'success')
+      reportOutcome(outcomeId, 'success')
       target.removeEventListener('click', handler, true)
     }
     target.addEventListener('click', handler, { capture: true, once: true })
@@ -106,19 +115,19 @@ export function renderIntervention(d: DispatchedIntervention): void {
     case 'TOOLTIP':
       return renderTooltip(target, d, ttl)
     case 'MODAL':
-      return renderModal(d)
+      return renderModal(d, outcomeId)
     case 'BANNER':
-      return renderBanner(d, ttl)
+      return renderBanner(d, ttl, outcomeId)
     case 'INLINE_HINT':
       return renderInlineHint(target, d, ttl)
     case 'TOUR':
-      return renderTour(d)
+      return renderTour(d, outcomeId)
     case 'ICON_FLASH':
       return renderIconFlash(target, ttl)
     case 'ARROW':
       return renderArrow(target, d, ttl)
     case 'CONFIRM':
-      return renderConfirm(d)
+      return renderConfirm(d, outcomeId)
     case 'ANNOUNCE':
       return renderAnnounce(d)
     default:
@@ -156,17 +165,32 @@ function makeDismissBtn(onDismiss: () => void, interventionId?: string): HTMLBut
   return b
 }
 
-function autoCleanup(el: HTMLElement, ms: number): void {
+function autoCleanup(el: HTMLElement, ms: number, onRemove?: () => void): void {
   if (ms <= 0) return
-  window.setTimeout(() => el.remove(), ms)
+  window.setTimeout(() => {
+    onRemove?.()
+    el.remove()
+  }, ms)
 }
 
 /**
  * Attach a one-shot ESC-key dismiss handler. Reports `dismissed` outcome and
- * removes the element. Listener is removed automatically on dismiss to avoid
- * leaks when many overlays render in a session.
+ * removes the element.
+ *
+ * The listener is attached the moment an intervention renders, but it can only
+ * ever fire for an element that is still in the document. A BANNER or MODAL
+ * that auto-dismisses, or that the user closes with the × or the "Got it"
+ * button, leaves this handler attached forever otherwise: the next keydown
+ * anywhere on the page removes the stale element (a no-op, it is already gone)
+ * and detaches, costing the user nothing - but until that keydown happens, every
+ * intervention rendered in the session keeps one listener on the document, and
+ * a long session that shows a dozen banners accumulates a dozen of them.
+ *
+ * So the handler detaches itself on the first keydown it sees after its own
+ * element has left the document, and functions return the teardown for the
+ * callers that know they are done with it (an auto-dismiss, a close button).
  */
-function attachEscDismiss(el: HTMLElement, interventionId?: string): void {
+function attachEscDismiss(el: HTMLElement, interventionId?: string): () => void {
   const onKey = (e: KeyboardEvent) => {
     if (e.key !== 'Escape') return
     if (!document.body.contains(el)) {
@@ -178,6 +202,16 @@ function attachEscDismiss(el: HTMLElement, interventionId?: string): void {
     document.removeEventListener('keydown', onKey, true)
   }
   document.addEventListener('keydown', onKey, true)
+  return () => document.removeEventListener('keydown', onKey, true)
+}
+
+/**
+ * Remove an element and detach the ESC handler that was attached to it, so a
+ * dismissed intervention leaves nothing on the document behind it.
+ */
+function removeWith(el: HTMLElement, detach: () => void): void {
+  detach()
+  el.remove()
 }
 
 /**
@@ -236,7 +270,11 @@ function flashRing(target: HTMLElement, kind: 'pulse' | 'glow' | 'spotlight'): H
 
 // ── individual renderers ────────────────────────────────────────────────────
 
-function renderOverlay(d: DispatchedIntervention, ttl: number) {
+function renderOverlay(
+  d: DispatchedIntervention,
+  ttl: number,
+  outcomeId: string = d.rowId ?? d.id,
+) {
   const card = document.createElement('div')
   card.className = '__sh_card__'
   card.setAttribute('role', 'status')
@@ -306,16 +344,16 @@ function renderOverlay(d: DispatchedIntervention, ttl: number) {
     diag.textContent = `${d.diagnostic.struggleType} · sev ${d.diagnostic.severity.toFixed(2)} · v${d.diagnostic.variantIndex ?? 0} · conf ${(conf).toFixed(2)}`
     body.appendChild(diag)
   }
-  const dismiss = makeDismissBtn(() => card.remove(), d.id)
+  // Keyboard dismiss - important for users who can't reach the × by mouse.
+  const detachEsc = attachEscDismiss(card, outcomeId)
+  const dismiss = makeDismissBtn(() => removeWith(card, detachEsc), outcomeId)
   row.appendChild(body)
   row.appendChild(dismiss)
   card.appendChild(row)
   root().appendChild(card)
-  // Keyboard dismiss - important for users who can't reach the × by mouse.
-  attachEscDismiss(card, d.id)
   // Lower-confidence interventions auto-dismiss faster.
   const adjustedTtl = conf >= 0.85 ? ttl : conf >= 0.5 ? Math.max(4000, ttl * 0.75) : Math.max(3000, ttl * 0.5)
-  autoCleanup(card, adjustedTtl)
+  autoCleanup(card, adjustedTtl, detachEsc)
 }
 
 function renderHighlight(target: HTMLElement | null, d: DispatchedIntervention, ttl: number) {
@@ -336,7 +374,27 @@ function renderHighlight(target: HTMLElement | null, d: DispatchedIntervention, 
 function renderSpotlight(target: HTMLElement | null, d: DispatchedIntervention, ttl: number) {
   if (!target) return
   const rect = target.getBoundingClientRect()
-  // SVG spotlight: full overlay with a hole punched out for the target.
+  // Full-screen dimmer with a hole punched out for the target.
+  //
+  // The hole is described in `polygon()` percentages, not pixels. A basic
+  // shape in a `clip-path` is sized against the box it is applied to, and this
+  // box is `position: fixed; inset: 0` - so a coordinate of `640px` means 640px
+  // *from the overlay's own left edge*, which for a fixed overlay is the
+  // viewport's left edge only by coincidence. The earlier revision wrote four
+  // viewport pixels into a viewport-wide box, and on a document whose scroll
+  // height exceeded the viewport the box grew while the hole did not: the two
+  // clipped-out point pairs landed outside the box, the paths did not close,
+  // and the `clip-path` resolved to nothing at all. The overlay then covered
+  // the element it was supposed to reveal, and the user saw a dark screen with
+  // no explanation. Percentages cannot drift like that: they are the same
+  // fraction of the box whatever the box's size, and the viewport is the box.
+  const pct = (px: number, extent: number): string =>
+    `${extent > 0 ? round((px / extent) * 100) : 0}%`
+  const { innerWidth: vw, innerHeight: vh } = window
+  const x0 = pct(rect.left - 6, vw)
+  const x1 = pct(rect.right + 6, vw)
+  const y0 = pct(rect.top - 6, vh)
+  const y1 = pct(rect.bottom + 6, vh)
   const overlay = document.createElement('div')
   Object.assign(overlay.style, {
     position: 'fixed',
@@ -345,12 +403,13 @@ function renderSpotlight(target: HTMLElement | null, d: DispatchedIntervention, 
     pointerEvents: 'none',
     zIndex: String(Z.spotlight + 1),
     clipPath: `polygon(
-      0 0, 100% 0, 100% 100%, 0 100%, 0 0,
-      ${rect.left - 6}px ${rect.top - 6}px,
-      ${rect.left - 6}px ${rect.bottom + 6}px,
-      ${rect.right + 6}px ${rect.bottom + 6}px,
-      ${rect.right + 6}px ${rect.top - 6}px,
-      ${rect.left - 6}px ${rect.top - 6}px
+      evenodd,
+      0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%,
+      ${x0} ${y0},
+      ${x0} ${y1},
+      ${x1} ${y1},
+      ${x1} ${y0},
+      ${x0} ${y0}
     )`,
   } as Partial<CSSStyleDeclaration>)
   root().appendChild(overlay)
@@ -359,6 +418,16 @@ function renderSpotlight(target: HTMLElement | null, d: DispatchedIntervention, 
   if (d.copy) renderOverlay({ ...d, autoDismissMs: ttl }, ttl)
   autoCleanup(overlay, ttl)
   autoCleanup(ring, ttl)
+}
+
+/** Trim a percentage to at most 3 decimals so the emitted `clip-path` stays readable. */
+function round(n: number): number {
+  return Math.round((n + Number.EPSILON) * 1000) / 1000
+}
+
+/** Keep a coordinate inside `[lo, hi]`. */
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.min(Math.max(n, lo), hi)
 }
 
 function renderTooltip(target: HTMLElement | null, d: DispatchedIntervention, ttl: number) {
@@ -396,7 +465,7 @@ function renderTooltip(target: HTMLElement | null, d: DispatchedIntervention, tt
   autoCleanup(ring, ttl)
 }
 
-function renderModal(d: DispatchedIntervention) {
+function renderModal(d: DispatchedIntervention, outcomeId: string = d.id) {
   const backdrop = document.createElement('div')
   Object.assign(backdrop.style, {
     position: 'fixed',
@@ -461,10 +530,11 @@ function renderModal(d: DispatchedIntervention) {
     cursor: 'pointer',
   } as Partial<CSSStyleDeclaration>)
   let teardownFocus: (() => void) | null = null
+  let teardownEsc: (() => void) | null = null
   const dismiss = () => {
     teardownFocus?.()
-    reportOutcome(d.id, 'dismissed')
-    backdrop.remove()
+    reportOutcome(outcomeId, 'dismissed')
+    removeWith(backdrop, () => teardownEsc?.())
   }
   close.addEventListener('click', dismiss)
   actions.appendChild(close)
@@ -475,10 +545,10 @@ function renderModal(d: DispatchedIntervention) {
   teardownFocus = trapFocus(card)
   close.focus()
   // ESC key closes.
-  attachEscDismiss(backdrop, d.id)
+  teardownEsc = attachEscDismiss(backdrop, outcomeId)
 }
 
-function renderBanner(d: DispatchedIntervention, ttl: number) {
+function renderBanner(d: DispatchedIntervention, ttl: number, outcomeId: string = d.id) {
   const bg =
     d.options?.severity === 'error'
       ? '#fee2e2'
@@ -515,10 +585,10 @@ function renderBanner(d: DispatchedIntervention, ttl: number) {
   text.style.flex = '1'
   text.innerHTML = decodeHtml(d.copy)
   banner.appendChild(text)
-  banner.appendChild(makeDismissBtn(() => banner.remove(), d.id))
+  const detachEsc = attachEscDismiss(banner, outcomeId)
+  banner.appendChild(makeDismissBtn(() => removeWith(banner, detachEsc), outcomeId))
   root().appendChild(banner)
-  attachEscDismiss(banner, d.id)
-  autoCleanup(banner, ttl)
+  autoCleanup(banner, ttl, detachEsc)
 }
 
 function renderInlineHint(target: HTMLElement | null, d: DispatchedIntervention, ttl: number) {
@@ -550,11 +620,11 @@ function renderInlineHint(target: HTMLElement | null, d: DispatchedIntervention,
   autoCleanup(hint, ttl)
 }
 
-function renderTour(d: DispatchedIntervention) {
+function renderTour(d: DispatchedIntervention, outcomeId: string = d.id) {
   // MVP tour: render as a modal with the title + copy. Real multi-step tours
   // use the TourConfig steps array, populated by the dispatcher in a later
   // phase.
-  renderModal({ ...d, type: 'MODAL' })
+  renderModal({ ...d, type: 'MODAL' }, outcomeId)
 }
 
 function renderIconFlash(target: HTMLElement | null, ttl: number) {
@@ -576,10 +646,19 @@ function renderArrow(target: HTMLElement | null, d: DispatchedIntervention, ttl:
   const rect = target.getBoundingClientRect()
   const arrow = document.createElement('div')
   arrow.textContent = '↓'
+  // Anchored above the element and pointing down at it. Above the fold there is
+  // no room for that, and an arrow rendered at a negative offset is simply not
+  // on the screen - the user gets a hint with no arrow and no way to tell one
+  // was meant to be there. Below the element reads just as well (it still
+  // points at it from the nearest side) and is always on screen.
+  const GUTTER = 36
+  const above = rect.top - GUTTER
+  const below = rect.bottom + 4
+  const top = above >= 0 ? above : Math.min(below, Math.max(0, window.innerHeight - GUTTER))
   Object.assign(arrow.style, {
     position: 'fixed',
-    left: `${rect.left + rect.width / 2 - 12}px`,
-    top: `${rect.top - 36}px`,
+    left: `${clamp(rect.left + rect.width / 2 - 12, 0, window.innerWidth - 24)}px`,
+    top: `${top}px`,
     fontSize: '28px',
     color: '#3b82f6',
     fontWeight: 'bold',
@@ -601,9 +680,12 @@ function renderArrow(target: HTMLElement | null, d: DispatchedIntervention, ttl:
   autoCleanup(arrow, ttl > 0 ? ttl : 6000)
 }
 
-function renderConfirm(d: DispatchedIntervention) {
-  // A confirm is an overlay with a "Yes" CTA. Same chrome as overlay.
-  renderOverlay(d, 0)
+function renderConfirm(d: DispatchedIntervention, outcomeId: string = d.id) {
+  // A confirm is an overlay with a "Yes" CTA. Same chrome as overlay. The
+  // overlay's own default would be right for a dispatched intervention, but the
+  // id is threaded explicitly so the reported outcome is the one the caller
+  // resolved - a confirm served from the cache still has to report its row.
+  renderOverlay(d, 0, outcomeId)
 }
 
 function renderAnnounce(d: DispatchedIntervention) {

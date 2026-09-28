@@ -393,13 +393,14 @@ var ClarusHeal = (() => {
     return el;
   }
   function renderIntervention(d) {
-    if (shown.has(d.id)) return;
-    shown.add(d.id);
-    reportOutcome(d.id, "shown");
+    const outcomeId = d.rowId ?? d.id;
+    if (shown.has(outcomeId)) return;
+    shown.add(outcomeId);
+    reportOutcome(outcomeId, "shown");
     const target = d.targetElementId ? findElement(d.targetElementId) : null;
     if (target) {
       const handler = () => {
-        reportOutcome(d.id, "success");
+        reportOutcome(outcomeId, "success");
         target.removeEventListener("click", handler, true);
       };
       target.addEventListener("click", handler, { capture: true, once: true });
@@ -416,19 +417,19 @@ var ClarusHeal = (() => {
       case "TOOLTIP":
         return renderTooltip(target, d, ttl);
       case "MODAL":
-        return renderModal(d);
+        return renderModal(d, outcomeId);
       case "BANNER":
-        return renderBanner(d, ttl);
+        return renderBanner(d, ttl, outcomeId);
       case "INLINE_HINT":
         return renderInlineHint(target, d, ttl);
       case "TOUR":
-        return renderTour(d);
+        return renderTour(d, outcomeId);
       case "ICON_FLASH":
         return renderIconFlash(target, ttl);
       case "ARROW":
         return renderArrow(target, d, ttl);
       case "CONFIRM":
-        return renderConfirm(d);
+        return renderConfirm(d, outcomeId);
       case "ANNOUNCE":
         return renderAnnounce(d);
       default:
@@ -459,9 +460,12 @@ var ClarusHeal = (() => {
     });
     return b;
   }
-  function autoCleanup(el, ms) {
+  function autoCleanup(el, ms, onRemove) {
     if (ms <= 0) return;
-    window.setTimeout(() => el.remove(), ms);
+    window.setTimeout(() => {
+      onRemove?.();
+      el.remove();
+    }, ms);
   }
   function attachEscDismiss(el, interventionId) {
     const onKey = (e) => {
@@ -475,6 +479,11 @@ var ClarusHeal = (() => {
       document.removeEventListener("keydown", onKey, true);
     };
     document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }
+  function removeWith(el, detach) {
+    detach();
+    el.remove();
   }
   function trapFocus(el) {
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -519,7 +528,7 @@ var ClarusHeal = (() => {
     if (kind === "pulse" && !REDUCED) ring.className = "__sh_pulse__";
     return ring;
   }
-  function renderOverlay(d, ttl) {
+  function renderOverlay(d, ttl, outcomeId = d.rowId ?? d.id) {
     const card = document.createElement("div");
     card.className = "__sh_card__";
     card.setAttribute("role", "status");
@@ -583,14 +592,14 @@ var ClarusHeal = (() => {
       diag.textContent = `${d.diagnostic.struggleType} \xB7 sev ${d.diagnostic.severity.toFixed(2)} \xB7 v${d.diagnostic.variantIndex ?? 0} \xB7 conf ${conf.toFixed(2)}`;
       body.appendChild(diag);
     }
-    const dismiss = makeDismissBtn(() => card.remove(), d.id);
+    const detachEsc = attachEscDismiss(card, outcomeId);
+    const dismiss = makeDismissBtn(() => removeWith(card, detachEsc), outcomeId);
     row.appendChild(body);
     row.appendChild(dismiss);
     card.appendChild(row);
     root().appendChild(card);
-    attachEscDismiss(card, d.id);
     const adjustedTtl = conf >= 0.85 ? ttl : conf >= 0.5 ? Math.max(4e3, ttl * 0.75) : Math.max(3e3, ttl * 0.5);
-    autoCleanup(card, adjustedTtl);
+    autoCleanup(card, adjustedTtl, detachEsc);
   }
   function renderHighlight(target, d, ttl) {
     if (!target) return;
@@ -605,6 +614,12 @@ var ClarusHeal = (() => {
   function renderSpotlight(target, d, ttl) {
     if (!target) return;
     const rect = target.getBoundingClientRect();
+    const pct = (px, extent) => `${extent > 0 ? round(px / extent * 100) : 0}%`;
+    const { innerWidth: vw, innerHeight: vh } = window;
+    const x0 = pct(rect.left - 6, vw);
+    const x1 = pct(rect.right + 6, vw);
+    const y0 = pct(rect.top - 6, vh);
+    const y1 = pct(rect.bottom + 6, vh);
     const overlay = document.createElement("div");
     Object.assign(overlay.style, {
       position: "fixed",
@@ -613,12 +628,13 @@ var ClarusHeal = (() => {
       pointerEvents: "none",
       zIndex: String(Z.spotlight + 1),
       clipPath: `polygon(
-      0 0, 100% 0, 100% 100%, 0 100%, 0 0,
-      ${rect.left - 6}px ${rect.top - 6}px,
-      ${rect.left - 6}px ${rect.bottom + 6}px,
-      ${rect.right + 6}px ${rect.bottom + 6}px,
-      ${rect.right + 6}px ${rect.top - 6}px,
-      ${rect.left - 6}px ${rect.top - 6}px
+      evenodd,
+      0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%,
+      ${x0} ${y0},
+      ${x0} ${y1},
+      ${x1} ${y1},
+      ${x1} ${y0},
+      ${x0} ${y0}
     )`
     });
     root().appendChild(overlay);
@@ -627,6 +643,12 @@ var ClarusHeal = (() => {
     if (d.copy) renderOverlay({ ...d, autoDismissMs: ttl }, ttl);
     autoCleanup(overlay, ttl);
     autoCleanup(ring, ttl);
+  }
+  function round(n) {
+    return Math.round((n + Number.EPSILON) * 1e3) / 1e3;
+  }
+  function clamp2(n, lo, hi) {
+    return Math.min(Math.max(n, lo), hi);
   }
   function renderTooltip(target, d, ttl) {
     if (!target) {
@@ -660,7 +682,7 @@ var ClarusHeal = (() => {
     autoCleanup(tip, ttl);
     autoCleanup(ring, ttl);
   }
-  function renderModal(d) {
+  function renderModal(d, outcomeId = d.id) {
     const backdrop = document.createElement("div");
     Object.assign(backdrop.style, {
       position: "fixed",
@@ -723,10 +745,11 @@ var ClarusHeal = (() => {
       cursor: "pointer"
     });
     let teardownFocus = null;
+    let teardownEsc = null;
     const dismiss = () => {
       teardownFocus?.();
-      reportOutcome(d.id, "dismissed");
-      backdrop.remove();
+      reportOutcome(outcomeId, "dismissed");
+      removeWith(backdrop, () => teardownEsc?.());
     };
     close.addEventListener("click", dismiss);
     actions.appendChild(close);
@@ -735,9 +758,9 @@ var ClarusHeal = (() => {
     root().appendChild(backdrop);
     teardownFocus = trapFocus(card);
     close.focus();
-    attachEscDismiss(backdrop, d.id);
+    teardownEsc = attachEscDismiss(backdrop, outcomeId);
   }
-  function renderBanner(d, ttl) {
+  function renderBanner(d, ttl, outcomeId = d.id) {
     const bg = d.options?.severity === "error" ? "#fee2e2" : d.options?.severity === "warning" ? "#fef3c7" : "#dbeafe";
     const fg = d.options?.severity === "error" ? "#991b1b" : d.options?.severity === "warning" ? "#854d0e" : "#1e3a8a";
     const banner = document.createElement("div");
@@ -764,10 +787,10 @@ var ClarusHeal = (() => {
     text.style.flex = "1";
     text.innerHTML = decodeHtml(d.copy);
     banner.appendChild(text);
-    banner.appendChild(makeDismissBtn(() => banner.remove(), d.id));
+    const detachEsc = attachEscDismiss(banner, outcomeId);
+    banner.appendChild(makeDismissBtn(() => removeWith(banner, detachEsc), outcomeId));
     root().appendChild(banner);
-    attachEscDismiss(banner, d.id);
-    autoCleanup(banner, ttl);
+    autoCleanup(banner, ttl, detachEsc);
   }
   function renderInlineHint(target, d, ttl) {
     if (!target) {
@@ -797,8 +820,8 @@ var ClarusHeal = (() => {
     root().appendChild(hint);
     autoCleanup(hint, ttl);
   }
-  function renderTour(d) {
-    renderModal({ ...d, type: "MODAL" });
+  function renderTour(d, outcomeId = d.id) {
+    renderModal({ ...d, type: "MODAL" }, outcomeId);
   }
   function renderIconFlash(target, ttl) {
     if (!target) return;
@@ -818,10 +841,14 @@ var ClarusHeal = (() => {
     const rect = target.getBoundingClientRect();
     const arrow = document.createElement("div");
     arrow.textContent = "\u2193";
+    const GUTTER = 36;
+    const above = rect.top - GUTTER;
+    const below = rect.bottom + 4;
+    const top = above >= 0 ? above : Math.min(below, Math.max(0, window.innerHeight - GUTTER));
     Object.assign(arrow.style, {
       position: "fixed",
-      left: `${rect.left + rect.width / 2 - 12}px`,
-      top: `${rect.top - 36}px`,
+      left: `${clamp2(rect.left + rect.width / 2 - 12, 0, window.innerWidth - 24)}px`,
+      top: `${top}px`,
       fontSize: "28px",
       color: "#3b82f6",
       fontWeight: "bold",
@@ -842,8 +869,8 @@ var ClarusHeal = (() => {
     if (d.copy) renderOverlay(d, ttl);
     autoCleanup(arrow, ttl > 0 ? ttl : 6e3);
   }
-  function renderConfirm(d) {
-    renderOverlay(d, 0);
+  function renderConfirm(d, outcomeId = d.id) {
+    renderOverlay(d, 0, outcomeId);
   }
   function renderAnnounce(d) {
     const region = document.createElement("div");
@@ -1008,6 +1035,7 @@ var ClarusHeal = (() => {
     }
     async function emit(eventType, el, meta) {
       if (disabled.has(eventType)) return null;
+      if (interactEventTypes.has(eventType)) noteInteractElement(eventType, el);
       const isOutcome = eventType === "CUSTOM" && typeof meta?.kind === "string" && meta.kind.startsWith("intervention_");
       if (!isOutcome && !shouldSample(eventType, el)) return null;
       let elementId = null;
@@ -1143,7 +1171,8 @@ var ClarusHeal = (() => {
         hoverTimer = window.setTimeout(() => {
           const meta = {};
           if (interactive.hasAttribute("title")) meta.tooltip = true;
-          void emit("HOVER", interactive, meta);
+          pendingHoverEl = interactive;
+          void emit("HOVER", null, meta);
         }, 250);
       },
       { capture: true, passive: true }
@@ -1163,28 +1192,47 @@ var ClarusHeal = (() => {
       { capture: false, passive: true }
     );
     let lastInteractEl = null;
+    let pendingHoverEl = null;
     let lastInteractTs = Date.now();
+    const DWELL_REPORT_MS = 1e4;
+    let reportedThisStretch = false;
+    let lastReportedMs = 0;
+    function markActivity() {
+      lastInteractTs = Date.now();
+      reportedThisStretch = false;
+    }
+    const interactEventTypes = /* @__PURE__ */ new Set([
+      "CLICK",
+      "INPUT_CHANGE",
+      "SUBMIT",
+      "PASTE",
+      "FOCUS"
+    ]);
     document.addEventListener(
       "mousemove",
       () => {
-        lastInteractTs = Date.now();
+        markActivity();
       },
       { capture: false, passive: true }
     );
-    window.setInterval(() => {
-      const dwellMs = Date.now() - lastInteractTs;
-      if (dwellMs >= 3e4) {
-        void emit("DWELL", lastInteractEl, { ms: dwellMs });
+    function noteInteractElement(eventType, el) {
+      if (el) {
+        lastInteractEl = el;
+        return;
       }
-    }, 3e4);
-    document.addEventListener(
-      "mousemove",
-      (e) => {
-        const t = e.target;
-        if (t) lastInteractEl = t;
-      },
-      { capture: false, passive: true }
-    );
+      if (eventType === "HOVER" && pendingHoverEl) lastInteractEl = pendingHoverEl;
+    }
+    window.setInterval(() => {
+      const quietMs = Date.now() - lastInteractTs;
+      const stretchMs = reportedThisStretch ? lastReportedMs + quietMs : quietMs;
+      if (stretchMs >= DWELL_REPORT_MS) {
+        noteInteractElement("HOVER", null);
+        void emit("DWELL", lastInteractEl, { ms: stretchMs });
+        lastReportedMs = stretchMs;
+        lastInteractTs = Date.now();
+        reportedThisStretch = true;
+      }
+    }, 1e3);
     window.addEventListener("error", (e) => {
       void emit("JS_ERROR", null, {
         message: e.message ?? "unknown",

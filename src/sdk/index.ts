@@ -274,6 +274,9 @@ function initInner(opts: InitOptions): void {
     meta?: RuntimeEvent['meta'],
   ): Promise<RuntimeEvent | null> {
     if (disabled.has(eventType)) return null
+    // Which element a later DWELL will name. A disabled event type is not an
+    // interaction the SDK recorded, so it does not move the pointer either.
+    if (interactEventTypes.has(eventType)) noteInteractElement(eventType, el)
     // Intervention outcome events (CUSTOM with meta.kind = 'intervention_*')
     // are also exempt regardless of sampling.
     const isOutcome =
@@ -430,7 +433,14 @@ function initInner(opts: InitOptions): void {
       hoverTimer = window.setTimeout(() => {
         const meta: RuntimeEvent['meta'] = {}
         if (interactive.hasAttribute('title')) meta.tooltip = true
-        void emit('HOVER', interactive, meta)
+        // A hover names its element, but only once the dwell that follows is
+        // actually reported - see `pendingHoverEl`. The event itself is emitted
+        // with a null element ID on purpose: hover is not a click, and hashing
+        // the element would put an `elementId` on HOVER events that the per-
+        // element baselines and the friction tables would then read as a real
+        // interaction with that element.
+        pendingHoverEl = interactive
+        void emit('HOVER', null, meta)
       }, 250)
     },
     { capture: true, passive: true },
@@ -452,30 +462,111 @@ function initInner(opts: InitOptions): void {
     { capture: false, passive: true },
   )
 
-  // ── Dwell (every 30s, last interactive element) ──────────────────────────
+  // ── Dwell (checked every second, reported at 10/30s … and re-armed) ──────
+  // The threshold is 15-30s and a per-element baseline can raise it further,
+  // so the check is far cheaper than the threshold; waking every 1s turns
+  // "stared at a page and did nothing" from up to 30s late into ~1s late. A
+  // 30s tick also handed out a free verification reset: any progress at all
+  // within 30s looked idle. The interval itself is not the signal, so it must
+  // never be what the threshold is compared against.
+  /**
+   * The element a DWELL report is *about*: the element the user was last
+   * interacting with when they went quiet. `noteInteractElement` below decides
+   * which events qualify; this is only the display copy of that decision.
+   *
+   * Every real interaction other than a hover moves this pointer, because the
+   * element a long dwell belongs to is not always the element the pointer
+   * happens to be resting on. A user who reads a page after clicking a button,
+   * or who types into a field and then stops, was staring at *that* element;
+   * carrying a stale hover would attribute the quiet stretch - and the
+   * `LONG_DWELL` row built from it - to whatever the mouse last glided over,
+   * usually a decorative block with no interaction at all.
+   */
   let lastInteractEl: Element | null = null
+  /**
+   * Where the deferred `mousemove` update will land. A hover is the weakest
+   * possible evidence of which element a dwell belongs to (moving the mouse
+   * across the page is not an interaction with anything), so it is applied
+   * last rather than winning every race against the events that are. Without
+   * this, one pointer twitch mid-stretch reassigns the whole report.
+   */
+  let pendingHoverEl: Element | null = null
   let lastInteractTs = Date.now()
+  /** Quiet time worth reporting as a dwell. Below the 15-30s rules on purpose
+   *  so an adapted baseline still has a reported number to act on. */
+  const DWELL_REPORT_MS = 10_000
+  /**
+   * Whether a DWELL has already been emitted for the quiet stretch currently
+   * in progress. The timer wakes every second, so without this a single idle
+   * period would re-fire on every later tick and feed the per-element dwell
+   * baseline duplicates of itself. It cannot be "did the timer reset
+   * lastInteractTs": the tick that carries the report has already read
+   * `lastInteractTs` by then, and a report that lands late in a stretch must
+   * describe the whole stretch, not just the time since the previous report.
+   */
+  let reportedThisStretch = false
+  /** The stretch length already reported in the current quiet period. */
+  let lastReportedMs = 0
+  function markActivity(): void {
+    lastInteractTs = Date.now()
+    reportedThisStretch = false
+  }
+  /**
+   * The event types that say "the user was working with this element": typing,
+   * pasting, submitting, clicking, focusing. `noteInteractElement` turns each
+   * into the element the SDK already resolved the event against, which is the
+   * one the server stores on the DWELL event and therefore the one the
+   * per-element dwell baseline and the intervention dispatcher both key on.
+   */
+  const interactEventTypes = new Set<EventType>([
+    'CLICK',
+    'INPUT_CHANGE',
+    'SUBMIT',
+    'PASTE',
+    'FOCUS',
+  ])
   document.addEventListener(
     'mousemove',
     () => {
-      lastInteractTs = Date.now()
+      markActivity()
     },
     { capture: false, passive: true },
   )
-  window.setInterval(() => {
-    const dwellMs = Date.now() - lastInteractTs
-    if (dwellMs >= 30_000) {
-      void emit('DWELL', lastInteractEl, { ms: dwellMs })
+  /**
+   * Which element a DWELL names.
+   *
+   * A hover names its target; anything else that is an interaction with an
+   * element goes through `emit`, which already resolved the element ID for the
+   * event it is sending. Reading it back from there keeps the dwell target and
+   * the event target the same object, instead of walking the DOM a second time
+   * and risking a different answer.
+   */
+  function noteInteractElement(eventType: EventType, el: Element | null): void {
+    if (el) {
+      lastInteractEl = el
+      return
     }
-  }, 30_000)
-  document.addEventListener(
-    'mousemove',
-    (e) => {
-      const t = e.target as Element | null
-      if (t) lastInteractEl = t
-    },
-    { capture: false, passive: true },
-  )
+    // Only a hover may reach here with `null`: every other type in the set
+    // reads its target straight off the click / submit / input / paste / focus
+    // event, so a null there means there is genuinely nothing to name and the
+    // previous element should stand rather than be cleared.
+    if (eventType === 'HOVER' && pendingHoverEl) lastInteractEl = pendingHoverEl
+  }
+  window.setInterval(() => {
+    const quietMs = Date.now() - lastInteractTs
+    // The stretch is measured from the last real interaction or from the start
+    // of this stretch, whichever is later - never from a report that merely
+    // reset the timer, or a two-minute stare would be reported as 10s.
+    const stretchMs = reportedThisStretch ? lastReportedMs + quietMs : quietMs
+    if (stretchMs >= DWELL_REPORT_MS) {
+      noteInteractElement('HOVER', null)
+      void emit('DWELL', lastInteractEl, { ms: stretchMs })
+      // Report the quiet stretch once, then carry on measuring it.
+      lastReportedMs = stretchMs
+      lastInteractTs = Date.now()
+      reportedThisStretch = true
+    }
+  }, 1000)
 
   // ── JS errors ────────────────────────────────────────────────────────────
   window.addEventListener('error', (e) => {

@@ -120,6 +120,22 @@ export interface EventBatchResponse {
 export interface DispatchedIntervention {
   /** Stable id so the SDK can avoid showing the same one twice in one session. */
   id: string
+  /**
+   * Database id of the persisted `Intervention` row. The outcome events the
+   * SDK reports (`shown` / `dismissed` / `success`) are keyed on this, because
+   * `/api/events` resolves them with `prisma.intervention.update({ where: {
+   * id } })` against the row. It is absent for a locally-rendered intervention
+   * (the SDK's own rage-click fallback) and for any shape a host builds itself,
+   * in which case the SDK falls back to `id`.
+   *
+   * The wire payload always carries it: the SDK's `id` is session-keyed
+   * (`iv_` + hash of session/type/element/variant) so it is stable per browser
+   * session but identical across sessions, while the row is population-keyed
+   * (`iv_` + hash of type/element/variant) so it aggregates impressions across
+   * every session. Server code strips both this and `variantGroup` /
+   * `variantIndex` only from the *dashboard* view, never from the SDK response.
+   */
+  rowId?: string
   type: InterventionRenderType
   /** Element to anchor the intervention to (highlight target etc.). */
   targetElementId: ElementId | null
