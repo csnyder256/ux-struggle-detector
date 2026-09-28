@@ -17,7 +17,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.127.0",
+    "@anthropic-ai/sdk": "^0.128.0",
     "@auth/prisma-adapter": "^2.11.3",
     "@babel/parser": "^7.29.9",
     "@babel/traverse": "^7.29.8",
