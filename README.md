@@ -203,7 +203,7 @@ src/
   sdk/                 dependency-free browser SDK (9 files, ~1,740 LOC)
   components/          hand-written shadcn-style primitives (no Radix dependency)
 prisma/                schema.prisma, 4 applied migrations
-tests/                 10 Vitest files, 165 tests
+tests/                 14 Vitest files, 191 tests
 scripts/               setup.sh, setup.ps1
 public/                sdk.js, sdk.min.js (checked-in esbuild output), demo/
 ```
@@ -233,6 +233,7 @@ Differs from `readValidation` in `react.ts` only in how the platform attributes 
 | `crypto.test.ts` | 6 | AES-GCM round trip and tamper detection |
 | `dispatcher-denylist.test.ts` | 5 | route denylist |
 | `email-sign-in.test.ts` | 4 | magic-link delivery over SMTP, sign-in address rules |
+| `sdk-scrubber-phone-bounds.test.ts` | 4 | phone-pattern bounds: suffix of a longer digit run is not redacted |
 | `ingest-schema.test.ts` | 3 | over-long page text is cut, not a rejected batch |
 | `session-payload.test.ts` | 1 | `/api/auth/session` never exposes the session token |
 | `sdk-dwell-backend.test.ts` | 5 | SDK dwell timer driven against a real DOM, its events fed to the real detector |
