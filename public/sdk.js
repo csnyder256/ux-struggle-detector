@@ -193,7 +193,15 @@ var ClarusHeal = (() => {
     // US SSN
     /\b\d{3}-\d{2}-\d{4}\b/g,
     // US phone (xxx) xxx-xxxx / xxx-xxx-xxxx / +1 xxx xxx xxxx etc.
-    /(?:\+?1[\s-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b/g,
+    //
+    // Every separator here is optional, which is what makes the loose form
+    // below match inside a longer token: `(?<![0-9A-Za-z])` / `(?![0-9])` pin
+    // the match to a standalone run so the tail of a longer digit run - the
+    // trailing ten digits of a tracking number or SKU - is not swallowed.
+    // `length` on the INPUT_CHANGE event is computed from this scrubbed value
+    // (src/sdk/index.ts:405-409), so over-matching here corrupts the
+    // field-length signal that SLOW_FILL and THRASH run on.
+    /(?<![0-9A-Za-z])(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}(?![0-9])/g,
     // International phone with country code (8+ digits, common formats)
     /\+\d{1,3}[\s.-]?\d{2,4}[\s.-]?\d{2,4}[\s.-]?\d{2,4}\b/g,
     // IBAN (rough - country letters + 2 check digits + up to 30 chars)

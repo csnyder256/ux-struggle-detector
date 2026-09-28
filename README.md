@@ -6,7 +6,7 @@
 ![TypeScript](https://img.shields.io/badge/typescript-5.6%20strict-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![Next.js](https://img.shields.io/badge/next.js-15%20app%20router-000000?style=flat-square&logo=nextdotjs&logoColor=white)
 ![Prisma](https://img.shields.io/badge/prisma-5%20%2F%20postgres-2D3748?style=flat-square&logo=prisma&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-179%20across%2010%20files-brightgreen?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-191%20across%2014%20files-brightgreen?style=flat-square)
 ![Detection rules](https://img.shields.io/badge/struggle%20rules-40-orange?style=flat-square)
 ![SDK](https://img.shields.io/badge/browser%20SDK-26%20KB%20minified-informational?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
@@ -201,7 +201,7 @@ src/
   sdk/                 dependency-free browser SDK (9 files, ~1,740 LOC)
   components/          hand-written shadcn-style primitives (no Radix dependency)
 prisma/                schema.prisma, 4 applied migrations
-tests/                 10 Vitest files, 165 tests
+tests/                 14 Vitest files, 191 tests
 scripts/               setup.sh, setup.ps1
 public/                sdk.js, sdk.min.js (checked-in esbuild output), demo/
 ```
@@ -214,7 +214,7 @@ The four migration directory names read as the project's phase history: `init`, 
 
 ## Testing
 
-187 tests across 13 Vitest files.
+191 tests across 14 Vitest files.
 
 | File | Tests | Covers |
 | --- | --- | --- |
@@ -229,6 +229,7 @@ The four migration directory names read as the project's phase history: `init`, 
 | `crypto.test.ts` | 6 | AES-GCM round trip and tamper detection |
 | `dispatcher-denylist.test.ts` | 5 | route denylist |
 | `email-sign-in.test.ts` | 4 | magic-link delivery over SMTP, sign-in address rules |
+| `sdk-scrubber-phone-bounds.test.ts` | 4 | phone-pattern bounds: suffix of a longer digit run is not redacted |
 | `ingest-schema.test.ts` | 3 | over-long page text is cut, not a rejected batch |
 | `session-payload.test.ts` | 1 | `/api/auth/session` never exposes the session token |
 
