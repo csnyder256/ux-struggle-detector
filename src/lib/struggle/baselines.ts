@@ -130,6 +130,20 @@ export async function computeBaselinesForOrg(orgId: string): Promise<BaselineCom
       // that was quiet longest. So group the rows by the stretch they belong to
       // (SDK meta.stretch) and take ONE sample per stretch: its longest report.
       //
+      // A stretch is identified by the PAIR (sessionId, meta.stretch), not by
+      // the stretch string alone. The SDK mints its stretch id client-side from
+      // a browser-local clock and a per-page counter, so the identical string
+      // `st_abc_1` is guaranteed to collide across tabs, devices and users:
+      // grouping on the bare string would fuse one quiet stretch from each of
+      // those sessions into a single sample, letting a 120s stare in some other
+      // session swallow 99 independent 10s stretches (and, worse, discarding
+      // the other sessions' samples outright). The session is the only field
+      // that separates two client-local stretch identities, so it is part of
+      // the key. The key is a null-prototype record whose fields are length-
+      // prefixed, because a joined string is ambiguous whenever one field can
+      // contain the separator ("a\u0000b" + "c" vs "a" + "b\u0000c"); length
+      // prefixes make two distinct (session, stretch) pairs two distinct keys.
+      //
       // Legacy rows (written before the identity existed) have no meta.stretch.
       // Each has no way to be tied to another, so each is its own stretch of the
       // length it reports - which is the pre-identity behaviour, preserved
@@ -143,10 +157,14 @@ export async function computeBaselinesForOrg(orgId: string): Promise<BaselineCom
           if (e.eventType !== 'DWELL') continue
           const m = e.meta as { ms?: number; stretch?: unknown } | null
           if (typeof m?.ms !== 'number' || m.ms <= 0) continue
-          const key =
-            typeof m.stretch === 'string' && m.stretch.length > 0
-              ? `stretch:${m.stretch}`
-              : `legacy:${legacyDwellIndex++}`
+          // Untagged legacy rows are tied to nothing, not even to each other:
+          // one key per row (its own index), under a discriminant that no
+          // (session, stretch) pair can produce, so it can never merge with a
+          // tagged stretch.
+          const tagged = typeof m.stretch === 'string' && m.stretch.length > 0
+          const key = tagged
+            ? dwellStretchKey(e.sessionId, m.stretch as string)
+            : `legacy\u0000${legacyDwellIndex++}`
           const previous = dwellByStretch.get(key)
           // The longest report describes the whole stretch; earlier heartbeats
           // are prefixes of it and contribute nothing on their own.
@@ -188,6 +206,21 @@ export async function computeBaselinesForOrg(orgId: string): Promise<BaselineCom
 
   result.ok = result.errorMessages.length === 0 || result.computed > 0
   return result
+}
+
+/**
+ * Collision-safe identity for one quiet stretch: the (session, stretch) pair.
+ *
+ * The SDK's `meta.stretch` is minted client-side and is only unique within one
+ * browser session, so the session is half the identity. Both fields are encoded
+ * with an explicit byte length so no two distinct pairs can produce the same
+ * key - a plain join is ambiguous the moment a field can contain the separator
+ * or is a callable Map key (`sessionId.toString`), and both are reachable from
+ * ingested data. The record has a null prototype so no field value can ever
+ * collide with an inherited member name.
+ */
+function dwellStretchKey(sessionId: string, stretch: string): string {
+  return JSON.stringify({ session: sessionId, stretch })
 }
 
 function percentile(values: number[], p: number): number {

@@ -4,13 +4,27 @@ Captured with **headless Chromium driving the built SDK bundle** — not jsdom.
 
 | Fact | Value |
 | --- | --- |
-| Source head | `a9422a1d5ed7f30f246a77245f5a06186a993a26` |
+| Source (at capture) | `HEAD be98ba8d8544e10a24694f9bd2e8d16188f67dce at capture, clean working tree (bundles commit-identical)` |
+| HEAD at capture | `be98ba8d8544e10a24694f9bd2e8d16188f67dce` |
+| Working tree at capture | clean - the capture executed the committed source of the HEAD above |
 | Chromium | `Chromium 154.0.8037.57 built on Debian GNU/Linux 12 (bookworm)` (`/usr/bin/chromium`) |
 | Node | `v22.23.2` |
 | `public/sdk.js` sha256 | `a0250c34e9dfec651bf9061a18f2301fe07eaa4e19334d63d0f0a592298da5cc` |
 | `public/sdk.min.js` sha256 | `c7241244b195ad059a79819fe25ef9b58b5e0f0c7024acf471ffc1bda84bca29` |
 
 Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
+
+## 0. Source provenance at capture
+
+```json
+{
+  "headAtCapture": "be98ba8d8544e10a24694f9bd2e8d16188f67dce",
+  "bundleSourceDirtyAtCapture": false,
+  "dirtyPathsAtCapture": [],
+  "bundleMatchesHead": true,
+  "sourceLabel": "HEAD be98ba8d8544e10a24694f9bd2e8d16188f67dce at capture, clean working tree (bundles commit-identical)"
+}
+```
 
 ## 1. Real Chromium constraint API (no SDK)
 
@@ -69,18 +83,18 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
   "withValidity": [
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790580776345_of0uxy83_1790580776353_ymon1ebs",
-      "sessionId": "sh_sess_1790580776345_of0uxy83",
+      "idempotencyKey": "sh_sess_1790583165162_n33gfqqp_1790583165172_4dl5m0uq",
+      "sessionId": "sh_sess_1790583165162_n33gfqqp",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "FOCUS",
-      "ts": "2026-09-28T07:32:56.353Z",
+      "ts": "2026-09-28T08:12:45.172Z",
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 7
+        "ageMs": 9
       },
       "element": {
         "touched": true,
@@ -94,19 +108,19 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790580776345_of0uxy83_1790580776354_ck24gl66",
-      "sessionId": "sh_sess_1790580776345_of0uxy83",
+      "idempotencyKey": "sh_sess_1790583165162_n33gfqqp_1790583165173_fd18ypwd",
+      "sessionId": "sh_sess_1790583165162_n33gfqqp",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "CLICK",
-      "ts": "2026-09-28T07:32:56.354Z",
+      "ts": "2026-09-28T08:12:45.173Z",
       "meta": {},
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 8
+        "ageMs": 10
       },
       "element": {
         "touched": true,
@@ -120,18 +134,18 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790580776345_of0uxy83_1790580776354_08wid1u0",
-      "sessionId": "sh_sess_1790580776345_of0uxy83",
+      "idempotencyKey": "sh_sess_1790583165162_n33gfqqp_1790583165173_45hgz2ie",
+      "sessionId": "sh_sess_1790583165162_n33gfqqp",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "BLUR",
-      "ts": "2026-09-28T07:32:56.354Z",
+      "ts": "2026-09-28T08:12:45.173Z",
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 9
+        "ageMs": 10
       },
       "element": {
         "touched": true,
@@ -145,18 +159,18 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790580776345_of0uxy83_1790580776355_bttw2gde",
-      "sessionId": "sh_sess_1790580776345_of0uxy83",
+      "idempotencyKey": "sh_sess_1790583165162_n33gfqqp_1790583165174_imrd668j",
+      "sessionId": "sh_sess_1790583165162_n33gfqqp",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "FOCUS",
-      "ts": "2026-09-28T07:32:56.355Z",
+      "ts": "2026-09-28T08:12:45.174Z",
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 9
+        "ageMs": 11
       },
       "element": {
         "touched": true,
@@ -169,19 +183,19 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790580776345_of0uxy83_1790580776355_ziiihvk8",
-      "sessionId": "sh_sess_1790580776345_of0uxy83",
+      "idempotencyKey": "sh_sess_1790583165162_n33gfqqp_1790583165175_09qk0ckq",
+      "sessionId": "sh_sess_1790583165162_n33gfqqp",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "CLICK",
-      "ts": "2026-09-28T07:32:56.355Z",
+      "ts": "2026-09-28T08:12:45.175Z",
       "meta": {},
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 9
+        "ageMs": 12
       },
       "element": {
         "touched": true,

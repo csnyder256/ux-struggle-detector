@@ -55,6 +55,35 @@ describe('real Chromium evidence', () => {
     const head = execSync('git rev-parse HEAD', { cwd: ROOT }).toString().trim()
     const chromiumVersion = execSync(`${CHROMIUM} --version`).toString().trim()
 
+    // ── 0. What source is actually under test ─────────────────────────────
+    // A HEAD string alone cannot describe a capture: a run taken with edits in
+    // the working tree would be labelled with a commit whose content it did not
+    // execute. Record the HEAD *at capture* plus the dirty state of every file
+    // that feeds the capture (the SDK bundle is generated from src/sdk/index.ts,
+    // so that source's cleanliness is part of the bundle's provenance), and
+    // derive the source label from BOTH. A dirty capture is described as dirty;
+    // it is never presented as the committed source of its HEAD.
+    const dirtyPaths = (
+      execSync('git status --porcelain -- src/sdk/index.ts public/sdk.js public/sdk.min.js', {
+        cwd: ROOT,
+      }).toString() || ''
+    )
+      .split('\n')
+      .map((line) => line.slice(3).trim())
+      .filter((p) => p.length > 0)
+
+    const sourceProvenance = {
+      headAtCapture: head,
+      bundleSourceDirtyAtCapture: dirtyPaths.length > 0,
+      dirtyPathsAtCapture: dirtyPaths,
+      bundleMatchesHead: dirtyPaths.length === 0,
+      sourceLabel:
+        dirtyPaths.length > 0
+          ? `HEAD ${head} at capture + uncommitted working-tree edits to ${dirtyPaths.join(', ')}`
+          : `HEAD ${head} at capture, clean working tree (bundles commit-identical)`,
+    }
+    evidence.push({ title: '0. Source provenance at capture', value: sourceProvenance })
+
     const page = await browser.newPage()
 
     // ── 1. The browser's own constraint API, no SDK involved ───────────────
@@ -240,6 +269,20 @@ describe('real Chromium evidence', () => {
     expect(bad.value).toBe('')
     expect(sdkCapture.withValidity.length).toBeGreaterThan(0)
 
+    // The provenance label must not claim more than was observed: a clean run
+    // says so, a dirty run says so. Neither form may read as "committed source
+    // of HEAD ran" when the bundle was edited in the working tree.
+    expect(sourceProvenance.headAtCapture).toBe(head)
+    if (sourceProvenance.bundleSourceDirtyAtCapture) {
+      expect(sourceProvenance.sourceLabel).toContain('uncommitted working-tree edits')
+    } else {
+      expect(sourceProvenance.sourceLabel).toContain('clean working tree')
+    }
+    // The hashes in the transcript are the bytes the browser actually executed,
+    // whatever the provenance - so re-hashing them now must reproduce the table.
+    expect(sha256(resolve(ROOT, 'public/sdk.js'))).toBe(sdkHash)
+    expect(sha256(resolve(ROOT, 'public/sdk.min.js'))).toBe(minHash)
+
     // ── 5. Write the transcript ───────────────────────────────────────────
     const lines: string[] = []
     lines.push('# Browser evidence — runtime validation & SDK capture (PR #38)')
@@ -248,7 +291,13 @@ describe('real Chromium evidence', () => {
     lines.push('')
     lines.push('| Fact | Value |')
     lines.push('| --- | --- |')
-    lines.push(`| Source head | \`${head}\` |`)
+    lines.push(`| Source (at capture) | \`${sourceProvenance.sourceLabel}\` |`)
+    lines.push(`| HEAD at capture | \`${head}\` |`)
+    lines.push(
+      dirtyPaths.length > 0
+        ? `| Working tree at capture | **dirty** - the bundle was built with uncommitted edits to ${dirtyPaths.map((p) => `\`${p}\``).join(', ')}, so this capture is NOT the committed source of the HEAD above |`
+        : `| Working tree at capture | clean - the capture executed the committed source of the HEAD above |`,
+    )
     lines.push(`| Chromium | \`${chromiumVersion}\` (\`${CHROMIUM}\`) |`)
     lines.push(`| Node | \`${process.version}\` |`)
     lines.push(`| \`public/sdk.js\` sha256 | \`${sdkHash}\` |`)

@@ -186,4 +186,84 @@ describe('dwell p95 is weighted by quiet stretch, not by heartbeat row', () => {
     // and the exact p95 pin the grouping.
     expect(baseline.p95DwellMs).toBe(25_000)
   })
+
+  it('root probe: identical stretch ids in different sessions remain independent', async () => {
+    // THE MATERIAL DEFECT. `meta.stretch` is minted by the SDK in the browser
+    // from a client-local clock and a per-page counter, so the SAME string is
+    // guaranteed to appear in other sessions - other tabs, other devices, other
+    // users. Keying the grouping on the bare string fuses all of them into one
+    // sample: 99 independent 10s stretches across 99 sessions plus one 120s
+    // stretch in a 100th session collapse to a single 120s sample, so p95
+    // reports 120s instead of 10s and the element reads as permanently calm -
+    // the adaptation is steered by whichever session sat still longest. This is
+    // the exact repro recorded at the PR #38 head (p95 120000, expected 10000).
+    for (let i = 0; i < 99; i++) {
+      storedEvents.push(
+        dwellRow(`short_${i}`, NOW.getTime() - 300_000 + i * 1_000, 10_000, 'same-stretch-id'),
+      )
+    }
+    storedEvents.push(
+      ...growingStretch('long-independent', NOW.getTime() - 200_000, 120_000, 'same-stretch-id'),
+    )
+    storedEvents.push(...filler())
+
+    const baseline = await computed()
+
+    // 100 independent stretches in 100 sessions: 99 of 10s and one of 120s.
+    // Sorted index floor(0.95*100)=95 -> the 96th of [10s x99, 120s] -> 10s.
+    expect(baseline.p95DwellMs).toBe(10_000)
+    // The samples are the 100 stretches, not one fused stretch per string.
+    expect(baseline.sampleSize).toBeGreaterThanOrEqual(100)
+  })
+
+  it('one session’s heartbeat rows still collapse to a single sample', async () => {
+    // The same session and the same stretch string: the 111 heartbeat rows of
+    // one growing quiet stretch are ONE sample. Pairing the key must not undo
+    // the grouping it exists to protect.
+    storedEvents.push(...growingStretch('one-session', NOW.getTime() - 300_000, 120_000, 'st_1'))
+    storedEvents.push(...filler())
+
+    const baseline = await computed()
+
+    expect(baseline.p95DwellMs).toBe(120_000)
+  })
+
+  it('distinct stretch strings in one session stay distinct samples', async () => {
+    storedEvents.push(...growingStretch('s', NOW.getTime() - 300_000, 15_000, 'st_1'))
+    storedEvents.push(...growingStretch('s', NOW.getTime() - 250_000, 25_000, 'st_2'))
+    storedEvents.push(...filler())
+
+    const baseline = await computed()
+
+    // Samples [15 000, 25 000] -> floor(0.95*2)=1 -> 25 000.
+    expect(baseline.p95DwellMs).toBe(25_000)
+  })
+
+  it('keys the pair unambiguously when a session id mimics a stretch string', async () => {
+    // A session id and a stretch id are both opaque ingested strings. With a
+    // naive `session|stretch` join, ('a', 'b|c') and ('a|b', 'c') are the same
+    // key, so the 120s sample could overwrite an unrelated session's 10s sample.
+    // The tuple key keeps them apart: two samples, [10 000, 120 000] ->
+    // floor(0.95*2)=1 -> 120 000; a collision would also give 120 000, so pin
+    // the count as well.
+    storedEvents.push(dwellRow('a', NOW.getTime() - 300_000, 10_000, 'b|c'))
+    storedEvents.push(dwellRow('a|b', NOW.getTime() - 250_000, 120_000, 'c'))
+    storedEvents.push(...filler())
+
+    const baseline = await computed()
+
+    expect(baseline.p95DwellMs).toBe(120_000)
+    const extraction = written as { baseline?: { sampleSize: number } } | undefined
+    expect(extraction?.baseline?.sampleSize).toBe(5) // 2 dwell sessions + sess_0..2 filler
+  })
+
+  it('keys the pair unambiguously when a stretch string mimics a session id', async () => {
+    storedEvents.push(dwellRow('a|b', NOW.getTime() - 300_000, 10_000, 'c'))
+    storedEvents.push(dwellRow('a', NOW.getTime() - 250_000, 120_000, 'b|c'))
+    storedEvents.push(...filler())
+
+    const baseline = await computed()
+
+    expect(baseline.p95DwellMs).toBe(120_000)
+  })
 })
