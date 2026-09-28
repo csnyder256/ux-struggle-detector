@@ -486,7 +486,9 @@ describe('dispatchInterventions - validation copy', () => {
     expect(copyFor({ customError: true })).toBe('Tax ID needs a valid value.')
     expect(copyFor({ rangeUnderflow: true, min: 18 })).toBe('Tax ID needs at least 18.')
     expect(copyFor({ rangeOverflow: true, max: 120 })).toBe('Tax ID needs at most 120.')
-    expect(copyFor({ stepMismatch: true, step: 5 })).toBe('Tax ID needs a multiple of 5.')
+    // A step with no `min` is anchored at 0 by the browser, so 0, 5, 10 are
+    // the values it actually accepts.
+    expect(copyFor({ stepMismatch: true, step: 5 })).toBe('Tax ID needs one of 0, 5, 10, 15, ….')
     expect(copyFor({ badInput: true })).toBe('Tax ID needs a number.')
   })
 

@@ -579,20 +579,12 @@ function readValidationFromAttrs(
   if (attrs.pattern) v.pattern = attrs.pattern
   if (attrs.step) v.step = Number.isNaN(Number(attrs.step)) ? attrs.step : Number(attrs.step)
   if (tag === 'input' && attrs.type) v.inputType = attrs.type
-  // Custom messages for constraint failures. Kept off the conflict-prone rules
-  // for the same reason as the AST parser: the SDK sends `valueMissing` for a
-  // blank required field, and claiming a value-missing constraint here as well
-  // would fire REQUIRED_MISSED and FORMAT_ERROR for one mistake.
-  if (attrs.setcustomvalidity) v.customValidity = attrs.setcustomvalidity
-  if (attrs.customerror) v.customError = true
-  if (attrs.tooshort) v.tooShort = true
-  if (attrs.toolong) v.tooLong = true
-  if (attrs.typemismatch) v.typeMismatch = true
-  if (attrs.patternmismatch) v.patternMismatch = true
-  if (attrs.badinput) v.badInput = true
-  if (attrs.rangeunderflow) v.rangeUnderflow = true
-  if (attrs.rangeoverflow) v.rangeOverflow = true
-  if (attrs.stepmismatch) v.stepMismatch = true
+  // Note: no validity flags are read from markup here, and none can be.
+  // `setCustomValidity`, `badInput`, `customError` and the rest are runtime
+  // state produced by calling browser APIs on a live element; they are not
+  // markup attributes and do not appear in a source file. The SDK captures
+  // them off the real element (the `validationMessage` it sends with a failing
+  // event), and that is the only path by which they reach the server.
   return v
 }
 

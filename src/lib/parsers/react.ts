@@ -333,21 +333,12 @@ function readValidation(attrs: Record<string, string>, tagName: string): Validat
   if (attrs.pattern) v.pattern = attrs.pattern
   if (attrs.step) v.step = Number.isNaN(Number(attrs.step)) ? attrs.step : Number(attrs.step)
   if (tagName === 'input' && attrs.type) v.inputType = attrs.type
-  // Custom messages for constraint failures. The conflict-prone rules are
-  // deliberately kept off the element: the SDK sends the browser's validity
-  // flags, and flagging both `valueMissing` (REQUIRED_MISSED) and a format
-  // rule (FORMAT_ERROR) for one failure counts a single mistake twice.
-  if (attrs.setCustomValidity) v.customValidity = attrs.setCustomValidity
-  else if (attrs.setcustomvalidity) v.customValidity = attrs.setcustomvalidity
-  if (attrs.customError) v.customError = true
-  if (attrs.tooShort) v.tooShort = true
-  if (attrs.tooLong) v.tooLong = true
-  if (attrs.typeMismatch) v.typeMismatch = true
-  if (attrs.patternMismatch) v.patternMismatch = true
-  if (attrs.badInput) v.badInput = true
-  if (attrs.rangeUnderflow) v.rangeUnderflow = true
-  if (attrs.rangeOverflow) v.rangeOverflow = true
-  if (attrs.stepMismatch) v.stepMismatch = true
+  // Note: no validity flags are read from markup here, and none can be.
+  // `setCustomValidity`, `badInput`, `customError` and the rest are runtime
+  // state a page produces by calling browser APIs on a live element - they are
+  // not markup attributes and never appear in a source file. The SDK captures
+  // them off the real element (see the `validationMessage` it sends with a
+  // failing event), and that is the only path by which they reach the server.
   return v
 }
 

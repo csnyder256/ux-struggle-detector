@@ -951,17 +951,28 @@ var ClarusHeal = (() => {
         if ("value" in el && typeof el.value === "string") ctx.valueLength = el.value.length;
         if (el.disabled) ctx.disabled = true;
         if (typeof el.checkValidity === "function" && !el.checkValidity()) {
-          const flags = [];
           const v = el.validity;
-          if (v?.valueMissing) flags.push("valueMissing");
-          if (v?.typeMismatch) flags.push("typeMismatch");
-          if (v?.patternMismatch) flags.push("patternMismatch");
-          if (v?.tooShort) flags.push("tooShort");
-          if (v?.tooLong) flags.push("tooLong");
-          if (v?.rangeUnderflow) flags.push("rangeUnderflow");
-          if (v?.rangeOverflow) flags.push("rangeOverflow");
-          if (v?.stepMismatch) flags.push("stepMismatch");
+          const byFlag = /* @__PURE__ */ new Map([
+            ["valueMissing", Boolean(v?.valueMissing)],
+            ["typeMismatch", Boolean(v?.typeMismatch)],
+            ["patternMismatch", Boolean(v?.patternMismatch)],
+            ["tooShort", Boolean(v?.tooShort)],
+            ["tooLong", Boolean(v?.tooLong)],
+            ["rangeUnderflow", Boolean(v?.rangeUnderflow)],
+            ["rangeOverflow", Boolean(v?.rangeOverflow)],
+            ["stepMismatch", Boolean(v?.stepMismatch)],
+            // Only a real browser has `badInput` and lets a page set a custom
+            // message; both are worth sending because a page's own message is
+            // better copy than anything reconstructed from attributes.
+            ["badInput", Boolean(v?.badInput)],
+            ["customError", Boolean(v?.customError)]
+          ]);
+          const flags = Array.from(byFlag).filter(([, on]) => on).map(([name]) => name);
           if (flags.length > 0) ctx.validity = flags.join(",");
+          if (v?.customError) {
+            const message = el.validationMessage?.trim();
+            if (message) ctx.validationMessage = message.slice(0, 200);
+          }
         }
       }
       if (el instanceof HTMLButtonElement && el.disabled) ctx.disabled = true;
@@ -1006,7 +1017,13 @@ var ClarusHeal = (() => {
       const rate = typeof perType === "number" ? perType : cfg.default ?? 1;
       return rate >= 1 ? true : rate <= 0 ? false : Math.random() < rate;
     }
-    async function emit(eventType, el, meta) {
+    let emitChain = Promise.resolve();
+    function emit(eventType, el, meta) {
+      const run = emitChain.then(() => emitNow(eventType, el, meta));
+      emitChain = run.catch(() => void 0);
+      return run;
+    }
+    async function emitNow(eventType, el, meta) {
       if (disabled.has(eventType)) return null;
       const isOutcome = eventType === "CUSTOM" && typeof meta?.kind === "string" && meta.kind.startsWith("intervention_");
       if (!isOutcome && !shouldSample(eventType, el)) return null;
@@ -1164,18 +1181,28 @@ var ClarusHeal = (() => {
     );
     let lastInteractEl = null;
     let lastInteractTs = Date.now();
+    const DWELL_REPORT_MS = 1e4;
+    let reportedThisStretch = false;
+    let lastReportedMs = 0;
+    function markActivity() {
+      lastInteractTs = Date.now();
+      reportedThisStretch = false;
+    }
     document.addEventListener(
       "mousemove",
       () => {
-        lastInteractTs = Date.now();
+        markActivity();
       },
       { capture: false, passive: true }
     );
     window.setInterval(() => {
-      const dwellMs = Date.now() - lastInteractTs;
-      if (dwellMs >= 1e4) {
-        void emit("DWELL", lastInteractEl, { ms: dwellMs });
+      const quietMs = Date.now() - lastInteractTs;
+      const stretchMs = reportedThisStretch ? lastReportedMs + quietMs : quietMs;
+      if (stretchMs >= DWELL_REPORT_MS) {
+        void emit("DWELL", lastInteractEl, { ms: stretchMs });
+        lastReportedMs = stretchMs;
         lastInteractTs = Date.now();
+        reportedThisStretch = true;
       }
     }, 1e3);
     document.addEventListener(

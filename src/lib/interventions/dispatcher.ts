@@ -56,8 +56,25 @@ export interface DispatchContext {
       inputType?: string
       min?: number | string
       max?: number | string
+      step?: number | string
+      customValidity?: string
+      customError?: boolean
+      tooShort?: boolean
+      tooLong?: boolean
+      typeMismatch?: boolean
+      patternMismatch?: boolean
+      badInput?: boolean
+      rangeUnderflow?: boolean
+      rangeOverflow?: boolean
+      stepMismatch?: boolean
     }
   >
+  /**
+   * Map elementId → the validation message a real page set on it at runtime
+   * (`setCustomValidity`), captured off the failing event. The browser owns
+   * that string and drops it on reload, so this is the only copy available.
+   */
+  validationMessageByElement?: Map<string, string>
   /** Map elementId → semantic role (SUBMIT / DANGER / etc.). */
   elementRoles?: Map<string, string>
   /** When true (default in first 7 days post-install), no interventions render. */
@@ -205,7 +222,12 @@ export function dispatchInterventionsWithRows(
     const pageTitle =
       ctx.pageTitleBySession?.get(det.sessionId) ?? ctx.routeTitles?.get(sessRoute) ?? ''
     const validation = det.elementId ? ctx.elementValidation?.get(det.elementId) : undefined
-    const validationHint = describeValidation(validation)
+    // A message the page set at runtime is stronger than anything the static
+    // map can assert, so it is preferred. Prefer the session's own capture from
+    // the failing field, then any capture for this element.
+    const runtimeValidityMessage =
+      (det.elementId ? ctx.validationMessageByElement?.get(det.elementId) : null) ?? null
+    const validationHint = describeValidation(validation, runtimeValidityMessage)
     const rsem = sessRoute ? ctx.routeSemantic?.get(sessRoute) : undefined
     const routePurpose = rsem?.purpose ?? ''
     const journeyStage = rsem?.journeyStage ?? ''
@@ -353,16 +375,46 @@ interface ValidationLite {
 }
 
 /**
+ * The allowed values for a stepped numeric field, as a short readable list.
+ *
+ * `min` is the base, not zero: `min="1" step="5"` permits 1, 6, 11 - writing
+ * "a multiple of 5" would tell the user 5 is valid when the browser will
+ * reject it, which is worse than saying nothing. Anchored at the base for a
+ * few steps, then generalised so a 0.01 step on a currency field does not
+ * print a hundred numbers.
+ */
+function describeStepValues(
+  min: number | string | undefined,
+  step: number | string | undefined,
+): string | null {
+  const stepNum = typeof step === 'number' ? step : Number(step)
+  if (!Number.isFinite(stepNum) || stepNum <= 0) return null
+  const minNum = typeof min === 'number' ? min : Number(min)
+  const base = Number.isFinite(minNum) ? minNum : 0
+  const values = [base, base + stepNum, base + 2 * stepNum, base + 3 * stepNum]
+  if (values.every((v) => Number.isInteger(v))) {
+    return `one of ${values.join(', ')}, …`
+  }
+  const rounded = values.map((v) => Math.round(v * 1000) / 1000)
+  return `one of ${rounded.join(', ')}, …`
+}
+
+/**
  * Convert a ValidationRules object into a single human-readable hint that
  * templates can splice in as `{validation}`.
  *
- * A message the customer wrote for the field (`setCustomValidity`) wins over
- * anything reconstructed from the attributes: it is what their page already
- * tells the user, and "this needs a valid VAT ID, not your card number" is
- * better copy than "this needs a valid format".
+ * A message the page wrote for the field is the best copy there is - it is
+ * what the page already shows the user - so it wins over anything
+ * reconstructed from attributes, in either form: the string captured from a
+ * real `setCustomValidity()` at runtime when the SDK sent one, or the literal
+ * a parser could resolve statically.
  */
-function describeValidation(v: ValidationLite | undefined): string {
-  if (!v) return ''
+function describeValidation(
+  v: ValidationLite | undefined,
+  runtimeMessage?: string | null,
+): string {
+  if (!v) return runtimeMessage ? runtimeMessage : ''
+  if (runtimeMessage) return runtimeMessage
   if (v.customValidity) return v.customValidity
   const parts: string[] = []
   if (v.required) parts.push('required')
@@ -388,7 +440,12 @@ function describeValidation(v: ValidationLite | undefined): string {
   if (v.badInput) parts.push('a number')
   if (v.rangeUnderflow) parts.push(`at least ${v.min ?? 'the minimum'}`)
   if (v.rangeOverflow) parts.push(`at most ${v.max ?? 'the maximum'}`)
-  if (v.stepMismatch) parts.push(`a multiple of ${v.step ?? 'the allowed step'}`)
+  if (v.stepMismatch) {
+    // A step is anchored on the min, so the honest hint lists real values
+    // rather than claiming a multiple of the step.
+    const allowed = describeStepValues(v.min, v.step)
+    parts.push(allowed ?? (v.step ? `a multiple of ${v.step}` : 'an allowed increment'))
+  }
   // Dedupe by the text that actually renders, so two rules that both describe
   // "a valid format" do not read as "needs a valid format, a valid format".
   const unique = Array.from(new Set(parts))

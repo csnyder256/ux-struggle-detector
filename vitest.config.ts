@@ -10,6 +10,7 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
     environment: 'node',
+    setupFiles: ['./tests/sdk-dom-env.ts'],
     server: {
       deps: {
         // next-auth's ESM imports `next/server` without an extension, which

@@ -174,11 +174,13 @@ function detectRageClicks(
     // fire RAGE_CLICK at the static threshold of 3 clicks in 2s. Bump the
     // threshold so we need 1.5x the typical p95 rate sustained for the window.
     //
-    // The floor stays at the static rule: a baseline LOWER than "3 clicks in
-    // 2s" must not make rage-click fire sooner than it does for an element we
-    // know nothing about. A calm element (a Delete button) is exactly the one
-    // where a false positive gets seen on a consequential screen, so the
-    // per-element data may only raise the bar here.
+    // The `Math.max` floor on the line below is what keeps this from lowering
+    // the bar: a baseline lower than "3 clicks in 2s" must not make
+    // rage-click fire sooner than it does for an element we know nothing
+    // about. A calm element (a Delete button) is exactly the one where a false
+    // positive gets seen on a consequential screen, so the per-element data
+    // may only raise the bar here. That floor is pre-existing behaviour that
+    // this change documents; it is not a bug that was fixed here.
     let minClicks: number = rule.minClicks
     const baseline = sample.elementId ? ctx.baselines?.get(sample.elementId) : undefined
     if (baseline?.p95ClicksPerSec && baseline.sampleSize && baseline.sampleSize >= 10) {
@@ -186,11 +188,13 @@ function detectRageClicks(
       minClicks = Math.max(minClicks, adapted)
     }
     if (clicks.length < minClicks) continue
-    // The window is a sliding one, not "the first `minClicks` clicks, ever".
-    // Walking it with a left pointer keeps a burst that arrives late in a long
-    // session detectable, which is the difference between catching a rage click
-    // and only catching it when it happens in the first few clicks of a
-    // session. Cost stays linear: neither pointer ever moves backwards.
+    // The scan below walks a sliding window with a left pointer instead of
+    // measuring only the first `minClicks` clicks of the bucket. Both shapes
+    // reach the same verdict - the previous loop already stepped
+    // `i` across every consecutive `minClicks` group - so this is a linear
+    // refactor, not a behaviour fix: the cost is still linear (neither pointer
+    // moves backwards) and the reader no longer has to prove to themselves that
+    // a burst late in a long session is reachable.
     let left = 0
     for (let right = 0; right < clicks.length; right++) {
       while (ts(clicks[right]!) - ts(clicks[left]!) > rule.windowMs) left++

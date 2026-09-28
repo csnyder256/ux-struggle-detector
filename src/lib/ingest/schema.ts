@@ -38,6 +38,7 @@ const ElementContextSchema = z
     dirty: z.boolean().optional(),
     valueLength: z.number().int().nonnegative().optional(),
     validity: clipped(200).optional(),
+    validationMessage: clipped(200).optional(),
     disabled: z.boolean().optional(),
     dead: z.boolean().optional(),
   })
@@ -91,3 +92,6 @@ export const BatchSchema = z.object({
   clockOffsetMs: z.number(),
   events: z.array(RuntimeEventSchema).max(500),
 })
+
+/** Exported so a transport/ingest test can assert one event's accepted shape. */
+export const RuntimeEventSchemaExport = RuntimeEventSchema

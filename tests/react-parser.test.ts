@@ -192,15 +192,15 @@ export function SignupForm() {
     expect(qty?.extraction?.validation?.max).toBe(99)
   })
 
-  it('captures a custom validation message and native constraint flags', async () => {
+  it('reads the constraint attributes that really exist, and invents no validity flags', async () => {
     await writeFile(
       'app/components/Custom.tsx',
       `export function C() {
   return (
     <form>
-      <input name="vat" pattern="^[A-Z]{2}[0-9]+$" setCustomValidity="That is not a VAT ID." />
-      <input name="count" type="number" step={5} />
-      <input name="code" onInvalid={handleInvalid} setCustomValidity={dynamicMessage} />
+      <input name="vat" pattern="^[A-Z]{2}[0-9]+$" />
+      <input name="count" type="number" step={5} min={1} />
+      <input name="code" onInvalid={handleInvalid} />
     </form>
   )
 }`,
@@ -212,16 +212,27 @@ export function SignupForm() {
     })
 
     const vat = map.elements.find((e) => e.extraction?.name === 'vat')
-    expect(vat?.extraction?.validation?.customValidity).toBe('That is not a VAT ID.')
     expect(vat?.extraction?.validation?.pattern).toBe('^[A-Z]{2}[0-9]+$')
 
     const count = map.elements.find((e) => e.extraction?.name === 'count')
     expect(count?.extraction?.validation?.step).toBe(5)
+    // `min` is the base a step is anchored on, so the dispatcher needs it to
+    // describe the allowed values honestly.
+    expect(count?.extraction?.validation?.min).toBe(1)
 
-    // A dynamic expression is not statically resolvable, so it is skipped
-    // rather than stringified into nonsense.
-    const code = map.elements.find((e) => e.extraction?.name === 'code')
-    expect(code?.extraction?.validation?.customValidity).toBeUndefined()
+    // `setCustomValidity`, `customError`, `badInput` and the other
+    // ValidityState flags are runtime state set by browser APIs on a live
+    // element. They are not markup attributes, so the parser must not claim to
+    // have found any - a static read of them would be fiction. The SDK
+    // captures them off the real element instead.
+    for (const el of map.elements) {
+      const v = el.extraction?.validation as Record<string, unknown> | undefined
+      expect(v?.customValidity).toBeUndefined()
+      expect(v?.customError).toBeUndefined()
+      expect(v?.badInput).toBeUndefined()
+      expect(v?.rangeUnderflow).toBeUndefined()
+      expect(v?.stepMismatch).toBeUndefined()
+    }
   })
 
   it('infers semantic roles from labels and types', async () => {

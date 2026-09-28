@@ -75,6 +75,13 @@ export interface ElementContext {
   valueLength?: number
   /** For inputs: validity flags (`valueMissing` / `typeMismatch` etc, comma-joined). */
   validity?: string
+  /**
+   * For inputs failing a page-set custom validity: the message the page itself
+   * passed to `setCustomValidity()`. The browser owns that string and it is
+   * lost on reload, so it has to travel with the validation failure event -
+   * this is the only copy the server can render back to the user.
+   */
+  validationMessage?: string
   /** True if the element is currently disabled. */
   disabled?: boolean
   /** True if the element has no click/submit/change handler we could detect. */
