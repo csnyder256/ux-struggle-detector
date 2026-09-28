@@ -135,7 +135,7 @@ export const STRUGGLE_INTERVENTIONS: Record<StruggleType, InterventionTemplate[]
   LOOP: [
     {
       type: 'BANNER',
-      copy: 'You&rsquo;ve been here a few times - looking for something specific?',
+      copy: 'You&rsquo;ve been back to {route} a few times - looking for something specific?',
       title: 'Help finding something?',
     },
     {
@@ -178,7 +178,7 @@ export const STRUGGLE_INTERVENTIONS: Record<StruggleType, InterventionTemplate[]
   CIRCULAR_NAV: [
     {
       type: 'BANNER',
-      copy: 'Bouncing between two pages - the action you might want is here.',
+      copy: 'Bouncing between pages around {route} - the action you might want is here.',
       target: 'self',
     },
   ],
@@ -288,7 +288,7 @@ export const STRUGGLE_INTERVENTIONS: Record<StruggleType, InterventionTemplate[]
   NOT_FOUND_BOUNCE: [
     {
       type: 'OVERLAY',
-      copy: 'That page is gone. Try the search bar - top of the page.',
+      copy: '{route} is gone. Try the search bar - top of the page.',
       target: 'help',
       autoDismissMs: 8000,
     },
