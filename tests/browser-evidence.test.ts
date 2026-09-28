@@ -111,7 +111,7 @@ describe('real Chromium evidence', () => {
       dirtyPathsAll.length > 0
         ? `working tree DIRTY at capture (${dirtyPathsAll.length} path(s) uncommitted, e.g. ${dirtyPathsAll
             .slice(0, 4)
-            .join(', ')}) - the capture is HEAD's bundle bytes, not HEAD's tree`
+            .join(', ')}) - the capture uses the measured bundle bytes and records working-tree edits`
         : 'working tree clean at capture',
     ].join('; ')
     evidence.push({ title: '0. Source provenance at capture', value: sourceProvenance })
@@ -342,7 +342,7 @@ describe('real Chromium evidence', () => {
     )
     lines.push(
       dirtyPathsAll.length > 0
-        ? `| Working tree at capture | **DIRTY** - ${dirtyPathsAll.length} uncommitted path(s): ${dirtyPathsAll.map((p) => `\`${p}\``).join(', ')}. This capture executed the committed SDK bundle bytes above, NOT the working tree of \`${head}\` |`
+        ? `| Working tree at capture | **DIRTY** - ${dirtyPathsAll.length} uncommitted path(s): ${dirtyPathsAll.map((p) => `\`${p}\``).join(', ')}. This capture records the measured SDK bundle bytes above and uncommitted paths relative to \`${head}\` |`
         : `| Working tree at capture | clean - no uncommitted paths at capture |`,
     )
     lines.push(`| Chromium | \`${chromiumVersion}\` (\`${CHROMIUM}\`) |`)
