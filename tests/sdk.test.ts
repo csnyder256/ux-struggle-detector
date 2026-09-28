@@ -312,9 +312,26 @@ describe('classifyPopstate', () => {
 describe('initSelfHealing during server-side rendering', () => {
   it('is a silent no-op when there is no window or document', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    expect(typeof window).toBe('undefined')
-    expect(() => initSelfHealing({ orgId: 'org_ssr' })).not.toThrow()
-    expect(warn).not.toHaveBeenCalled()
+    // The test environment has a live jsdom document (tests/sdk-dom-env.ts), so
+    // hide both globals for the duration of the call to reproduce the server
+    // render pass the SDK guards against.
+    const hidden = ['window', 'document'] as const
+    const saved = hidden.map((k) => [
+      k,
+      Object.getOwnPropertyDescriptor(globalThis, k),
+    ] as const)
+    for (const k of hidden) {
+      Object.defineProperty(globalThis, k, { value: undefined, configurable: true })
+    }
+    try {
+      expect(typeof window).toBe('undefined')
+      expect(() => initSelfHealing({ orgId: 'org_ssr' })).not.toThrow()
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      for (const [k, desc] of saved) {
+        if (desc) Object.defineProperty(globalThis, k, desc)
+      }
+    }
     warn.mockRestore()
   })
 })

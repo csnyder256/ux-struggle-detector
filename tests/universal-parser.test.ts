@@ -51,6 +51,42 @@ describe('UniversalHtmlParser', () => {
     expect(labels).toContain('Your name')
   })
 
+  it('reads the constraint attributes that really exist, and invents no validity flags', async () => {
+    await writeFile(
+      'validated.vue',
+      `<template>
+        <form>
+          <input name="vat" required />
+          <input name="count" type="number" step="5" min="1" max="99" />
+        </form>
+      </template>`,
+    )
+    const parser = new UniversalHtmlParser('vue')
+    const map = await parser.parse({
+      orgId: 'org_univ_validation',
+      source: { kind: 'repo', rootDir: scratch },
+    })
+    const vat = map.elements.find((e) => e.extraction?.name === 'vat')
+    expect(vat?.extraction?.validation?.required).toBe(true)
+
+    const count = map.elements.find((e) => e.extraction?.name === 'count')
+    expect(count?.extraction?.validation?.step).toBe(5)
+    expect(count?.extraction?.validation?.min).toBe(1)
+    expect(count?.extraction?.validation?.max).toBe(99)
+
+    // `setcustomvalidity`, `customerror`, `badinput` and the rest of the
+    // ValidityState set are not markup attributes a template can carry - they
+    // are runtime state a live element reports. The parser must not claim to
+    // have read any of them.
+    for (const el of map.elements) {
+      const v = el.extraction?.validation as Record<string, unknown> | undefined
+      expect(v?.customValidity).toBeUndefined()
+      expect(v?.customError).toBeUndefined()
+      expect(v?.badInput).toBeUndefined()
+      expect(v?.stepMismatch).toBeUndefined()
+    }
+  })
+
   it('produces stable element ids across runs', async () => {
     await writeFile(
       'stable.svelte',

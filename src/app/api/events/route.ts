@@ -214,6 +214,24 @@ export async function POST(req: NextRequest) {
 
   const detections = detectStruggles(allEvents, { baselines })
 
+  // The page's own validation messages, taken off the events in this batch.
+  // The browser owns `validationMessage` and drops it on reload, so it can
+  // only reach the dispatcher through the failing event itself. Last write
+  // wins: the most recent failure on that field is the one worth showing.
+  const validationMessageByElement = new Map<string, Map<string, string>>()
+  for (const e of allEvents) {
+    if (!e.elementId) continue
+    const message = e.element?.validationMessage
+    if (typeof message === 'string' && message.trim()) {
+      let messages = validationMessageByElement.get(e.sessionId)
+      if (!messages) {
+        messages = new Map()
+        validationMessageByElement.set(e.sessionId, messages)
+      }
+      messages.set(e.elementId, message.trim())
+    }
+  }
+
   // ── Persist struggle events (best effort).
   for (const d of detections) {
     if (!STRUGGLE_TYPE_SET.has(d.type)) continue
@@ -256,13 +274,13 @@ export async function POST(req: NextRequest) {
             ? { successes: { increment: 1 } }
             : { dismissals: { increment: 1 } }
       const updated = await prisma.intervention.update({
-        where: { id: iid },
+        where: { id: iid, orgId },
         data: incData,
         select: { impressions: true, successes: true },
       })
       if (updated.impressions > 0) {
         await prisma.intervention.update({
-          where: { id: iid },
+          where: { id: iid, orgId },
           data: { successRate: updated.successes / updated.impressions },
         })
       }
@@ -346,7 +364,7 @@ export async function POST(req: NextRequest) {
   const elementsWithSemantics =
     elementIds.length > 0
       ? ((await prisma.uIElement.findMany({
-          where: { id: { in: elementIds } },
+          where: { id: { in: elementIds }, orgId },
           select: {
             id: true,
             labelRaw: true,
@@ -386,6 +404,17 @@ export async function POST(req: NextRequest) {
       inputType?: string
       min?: number | string
       max?: number | string
+      step?: number | string
+      customValidity?: string
+      customError?: boolean
+      tooShort?: boolean
+      tooLong?: boolean
+      typeMismatch?: boolean
+      patternMismatch?: boolean
+      badInput?: boolean
+      rangeUnderflow?: boolean
+      rangeOverflow?: boolean
+      stepMismatch?: boolean
     }
   >()
   for (const el of elementsWithSemantics) {
@@ -530,10 +559,12 @@ export async function POST(req: NextRequest) {
   }
 
   const dispatched = dispatchInterventionsWithRows(detections, {
+    orgId,
     elementLabels: labelMap,
     elementSemantics: semanticMap,
     elementRoles,
     elementValidation,
+    validationMessageByElement,
     semanticNameIndex,
     safeMode,
     routeBySession,
@@ -553,13 +584,13 @@ export async function POST(req: NextRequest) {
     if (!d.targetElementId) continue
     try {
       const exists = await prisma.uIElement.findUnique({
-        where: { id: d.targetElementId },
+        where: { id: d.targetElementId, orgId },
         select: { id: true },
       })
       if (!exists) continue
 
       const existing = await prisma.intervention.findUnique({
-        where: { id: d.rowId },
+        where: { id: d.rowId, orgId },
         select: { enabled: true },
       })
       if (existing && !existing.enabled) {
@@ -568,7 +599,7 @@ export async function POST(req: NextRequest) {
       }
 
       await prisma.intervention.upsert({
-        where: { id: d.rowId },
+        where: { id: d.rowId, orgId },
         create: {
           id: d.rowId,
           orgId,
@@ -587,10 +618,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Strip variant fields and skip paused interventions before sending to the SDK.
+  // Keep rowId for outcome feedback; strip internal variant metadata.
   const interventions = dispatched
     .filter((d) => !pausedIds.has(d.rowId))
-    .map(({ rowId: _rowId, variantGroup: _vg, variantIndex: _vi, ...rest }) => rest)
+    .map(({ variantGroup: _vg, variantIndex: _vi, ...rest }) => rest)
 
   const response: EventBatchResponse = {
     accepted,

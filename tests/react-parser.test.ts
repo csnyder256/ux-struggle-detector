@@ -192,6 +192,49 @@ export function SignupForm() {
     expect(qty?.extraction?.validation?.max).toBe(99)
   })
 
+  it('reads the constraint attributes that really exist, and invents no validity flags', async () => {
+    await writeFile(
+      'app/components/Custom.tsx',
+      `export function C() {
+  return (
+    <form>
+      <input name="vat" pattern="^[A-Z]{2}[0-9]+$" />
+      <input name="count" type="number" step={5} min={1} />
+      <input name="code" onInvalid={handleInvalid} />
+    </form>
+  )
+}`,
+    )
+    const parser = new ReactBabelParser()
+    const map = await parser.parse({
+      orgId: 'org_custom_validity',
+      source: { kind: 'repo', rootDir: scratch },
+    })
+
+    const vat = map.elements.find((e) => e.extraction?.name === 'vat')
+    expect(vat?.extraction?.validation?.pattern).toBe('^[A-Z]{2}[0-9]+$')
+
+    const count = map.elements.find((e) => e.extraction?.name === 'count')
+    expect(count?.extraction?.validation?.step).toBe(5)
+    // `min` is the base a step is anchored on, so the dispatcher needs it to
+    // describe the allowed values honestly.
+    expect(count?.extraction?.validation?.min).toBe(1)
+
+    // `setCustomValidity`, `customError`, `badInput` and the other
+    // ValidityState flags are runtime state set by browser APIs on a live
+    // element. They are not markup attributes, so the parser must not claim to
+    // have found any - a static read of them would be fiction. The SDK
+    // captures them off the real element instead.
+    for (const el of map.elements) {
+      const v = el.extraction?.validation as Record<string, unknown> | undefined
+      expect(v?.customValidity).toBeUndefined()
+      expect(v?.customError).toBeUndefined()
+      expect(v?.badInput).toBeUndefined()
+      expect(v?.rangeUnderflow).toBeUndefined()
+      expect(v?.stepMismatch).toBeUndefined()
+    }
+  })
+
   it('infers semantic roles from labels and types', async () => {
     await writeFile(
       'app/components/Roles.tsx',
@@ -247,7 +290,9 @@ export function SignupForm() {
     const email = map.elements.find((e) => e.extraction?.name === 'email')
     expect(email?.extraction?.formContext).toBe('signupForm')
 
-    const form = map.elements.find((e) => e.elementType === 'FORM')
+    // The scratch dir is shared across this file, so match the form by the
+    // endpoint it declares rather than by being the first FORM in the tree.
+    const form = map.elements.find((e) => e.extraction?.endpoint === '/api/signup')
     expect(form?.extraction?.endpoint).toBe('/api/signup')
   })
 

@@ -15,6 +15,7 @@
  * the dispatcher returns []. The SDK still collects events.
  */
 
+import { createHash } from 'node:crypto'
 import { STRUGGLE_INTERVENTIONS, type InterventionTemplate } from './library'
 import type {
   DispatchedIntervention,
@@ -24,6 +25,8 @@ import type {
 } from '@/lib/types/events'
 
 export interface DispatchContext {
+  /** Organization owning the persisted rows and their feedback. */
+  orgId?: string
   /** Map elementId → labelRaw (for {label} substitution). Optional. */
   elementLabels?: Map<string, string | null>
   /**
@@ -56,8 +59,25 @@ export interface DispatchContext {
       inputType?: string
       min?: number | string
       max?: number | string
+      step?: number | string
+      customValidity?: string
+      customError?: boolean
+      tooShort?: boolean
+      tooLong?: boolean
+      typeMismatch?: boolean
+      patternMismatch?: boolean
+      badInput?: boolean
+      rangeUnderflow?: boolean
+      rangeOverflow?: boolean
+      stepMismatch?: boolean
     }
   >
+  /**
+   * Map sessionId → elementId → the scrubbed validation message a real page set on it at runtime
+   * (`setCustomValidity`), captured off the failing event. The browser owns
+   * that string and drops it on reload, so this is the only copy available.
+   */
+  validationMessageByElement?: Map<string, Map<string, string>>
   /** Map elementId → semantic role (SUBMIT / DANGER / etc.). */
   elementRoles?: Map<string, string>
   /** When true (default in first 7 days post-install), no interventions render. */
@@ -122,7 +142,7 @@ export function dispatchInterventions(
   ctx: DispatchContext,
 ): DispatchedIntervention[] {
   return dispatchInterventionsWithRows(detections, ctx).map(
-    ({ rowId: _rowId, variantGroup: _vg, variantIndex: _vi, ...d }) => d,
+    ({ variantGroup: _vg, variantIndex: _vi, ...d }) => d,
   )
 }
 
@@ -165,6 +185,7 @@ export function dispatchInterventionsWithRows(
       ctx.banditEpsilon ?? 0.1,
       ctx.banditMinSamples ?? 30,
       ctx.random,
+      ctx.orgId ?? '',
     )
     let tmpl = variantPool[variantIndex]!
     let isCached = cached === variantPool
@@ -190,7 +211,7 @@ export function dispatchInterventionsWithRows(
     // Tracking id (session-keyed) for SDK dedup + in-batch dedup.
     const trackingId = sdkTrackingId(det.sessionId, det.type, det.elementId, variantIndex)
     // Population-keyed row id used for DB persistence + bandit stats aggregation.
-    const rowId = populationRowId(det.type, det.elementId, variantIndex)
+    const rowId = populationRowId(det.type, det.elementId, variantIndex, ctx.orgId ?? '')
     if (usedKeys.has(trackingId)) continue
     if (ctx.alreadyShown?.has(trackingId)) continue
     usedKeys.add(trackingId)
@@ -205,7 +226,14 @@ export function dispatchInterventionsWithRows(
     const pageTitle =
       ctx.pageTitleBySession?.get(det.sessionId) ?? ctx.routeTitles?.get(sessRoute) ?? ''
     const validation = det.elementId ? ctx.elementValidation?.get(det.elementId) : undefined
-    const validationHint = describeValidation(validation)
+    // A message the page set at runtime is stronger than anything the static
+    // map can assert, so it is preferred. Prefer the session's own capture from
+    // the failing field, then any capture for this element.
+    const runtimeValidityMessage =
+      (det.elementId ? ctx.validationMessageByElement?.get(det.sessionId)?.get(det.elementId) : null) ?? null
+    const validationHint = asSentenceFragment(
+      describeValidation(validation, runtimeValidityMessage),
+    )
     const rsem = sessRoute ? ctx.routeSemantic?.get(sessRoute) : undefined
     const routePurpose = rsem?.purpose ?? ''
     const journeyStage = rsem?.journeyStage ?? ''
@@ -309,6 +337,15 @@ function buildOptions(
   return Object.keys(out).length > 0 ? out : undefined
 }
 
+/**
+ * Fill the copy template's variables.
+ *
+ * `{route}` is not substituted with an empty string. A batch can arrive with
+ * no NAVIGATION event and no hydrated history, so the session's route is
+ * unknown - and "You&rsquo;ve been back to  a few times" is a broken sentence, while
+ * a literal `{route}` is a bug the customer sees. Both are worse than copy
+ * that says less, so the phrase collapses to the part that is still true.
+ */
 function render(
   template: string,
   vars: {
@@ -321,9 +358,19 @@ function render(
     journeyStage?: string | null
   },
 ): string {
-  return template
+  const route = vars.route && vars.route.trim() ? vars.route : null
+  let out = template
+  if (route === null) {
+    // "been back to {route} a few times" -> "been back here a few times"
+    out = out.replace(/back to \{route\}/g, 'back here')
+    // "{route} is gone" -> "That page is gone"
+    out = out.replace(/\{route\} is gone/g, 'That page is gone')
+    // "Bouncing between pages around {route}" -> "Bouncing between two pages"
+    out = out.replace(/ between pages around \{route\}/g, ' between two pages')
+  }
+  return out
     .replace(/\{label\}/g, vars.label ?? 'this')
-    .replace(/\{route\}/g, vars.route ?? '')
+    .replace(/\{route\}/g, route ?? '')
     .replace(/\{intent\}/g, vars.intent ?? vars.label ?? 'continue')
     .replace(/\{pageTitle\}/g, vars.pageTitle ?? '')
     .replace(/\{validation\}/g, vars.validation ?? '')
@@ -339,14 +386,61 @@ interface ValidationLite {
   inputType?: string
   min?: number | string
   max?: number | string
+  step?: number | string
+  customValidity?: string
+  customError?: boolean
+  tooShort?: boolean
+  tooLong?: boolean
+  typeMismatch?: boolean
+  patternMismatch?: boolean
+  badInput?: boolean
+  rangeUnderflow?: boolean
+  rangeOverflow?: boolean
+  stepMismatch?: boolean
+}
+
+/**
+ * The allowed values for a stepped numeric field, as a short readable list.
+ *
+ * `min` is the base, not zero: `min="1" step="5"` permits 1, 6, 11 - writing
+ * "a multiple of 5" would tell the user 5 is valid when the browser will
+ * reject it, which is worse than saying nothing. Anchored at the base for a
+ * few steps, then generalised so a 0.01 step on a currency field does not
+ * print a hundred numbers.
+ */
+function describeStepValues(
+  min: number | string | undefined,
+  step: number | string | undefined,
+): string | null {
+  const stepNum = typeof step === 'number' ? step : Number(step)
+  if (!Number.isFinite(stepNum) || stepNum <= 0) return null
+  const minNum = typeof min === 'number' ? min : Number(min)
+  const base = Number.isFinite(minNum) ? minNum : 0
+  const values = [base, base + stepNum, base + 2 * stepNum, base + 3 * stepNum]
+  if (values.every((v) => Number.isInteger(v))) {
+    return `one of ${values.join(', ')}, …`
+  }
+  const rounded = values.map((v) => Math.round(v * 1000) / 1000)
+  return `one of ${rounded.join(', ')}, …`
 }
 
 /**
  * Convert a ValidationRules object into a single human-readable hint that
  * templates can splice in as `{validation}`.
+ *
+ * A message the page wrote for the field is the best copy there is - it is
+ * what the page already shows the user - so it wins over anything
+ * reconstructed from attributes, in either form: the string captured from a
+ * real `setCustomValidity()` at runtime when the SDK sent one, or the literal
+ * a parser could resolve statically.
  */
-function describeValidation(v: ValidationLite | undefined): string {
-  if (!v) return ''
+function describeValidation(
+  v: ValidationLite | undefined,
+  runtimeMessage?: string | null,
+): string {
+  if (!v) return runtimeMessage ? runtimeMessage : ''
+  if (runtimeMessage) return runtimeMessage
+  if (v.customValidity) return v.customValidity
   const parts: string[] = []
   if (v.required) parts.push('required')
   if (v.inputType === 'email') parts.push('valid email')
@@ -360,7 +454,42 @@ function describeValidation(v: ValidationLite | undefined): string {
   if (v.minLength) parts.push(`at least ${v.minLength} characters`)
   if (v.maxLength) parts.push(`at most ${v.maxLength} characters`)
   if (v.pattern && !v.inputType) parts.push('a valid format')
-  return parts.length > 0 ? `needs ${parts.join(', ')}` : ''
+  // Constraint failures the element raises itself. Without these, a field that
+  // only fails `customError` or a bad range described itself as needing
+  // nothing at all, and the rendered copy said "{label} ."
+  if (v.customError) parts.push('a valid value')
+  if (v.tooShort) parts.push('more characters')
+  if (v.tooLong) parts.push('fewer characters')
+  if (v.typeMismatch) parts.push('a valid format')
+  if (v.patternMismatch) parts.push('a valid format')
+  if (v.badInput) parts.push('a number')
+  if (v.rangeUnderflow) parts.push(`at least ${v.min ?? 'the minimum'}`)
+  if (v.rangeOverflow) parts.push(`at most ${v.max ?? 'the maximum'}`)
+  if (v.stepMismatch) {
+    // A step is anchored on the min, so the honest hint lists real values
+    // rather than claiming a multiple of the step.
+    const allowed = describeStepValues(v.min, v.step)
+    parts.push(allowed ?? (v.step ? `a multiple of ${v.step}` : 'an allowed increment'))
+  }
+  // Dedupe by the text that actually renders, so two rules that both describe
+  // "a valid format" do not read as "needs a valid format, a valid format".
+  const unique = Array.from(new Set(parts))
+  return unique.length > 0 ? `needs ${unique.join(', ')}` : ''
+}
+
+/**
+ * Make a validation hint safe to splice into a template sentence.
+ *
+ * A browser `validationMessage` and a page's own `setCustomValidity` string
+ * normally END with a period ("... not a VAT ID."), and the templates that use
+ * `{validation}` ("{label} {validation}.") add their own. Splicing one into the
+ * other rendered "Tax ID That is a card number, not a VAT ID.." - a doubled
+ * period the user actually sees. Strip trailing sentence punctuation from the
+ * hint; the template owns the punctuation, exactly as it does for every other
+ * value it interpolates.
+ */
+function asSentenceFragment(hint: string): string {
+  return hint.replace(/[.!?]+\s*$/, '')
 }
 
 /** Deterministic variant pick keyed by session + struggle type (cold start). */
@@ -397,6 +526,7 @@ function pickVariantBandit(
   epsilon: number,
   minSamples: number,
   random: (() => number) | undefined,
+  orgId: string,
 ): number {
   if (n <= 1) return 0
   const rng = random ?? Math.random
@@ -405,7 +535,7 @@ function pickVariantBandit(
   let totalImpressions = 0
   const perVariant: { impressions: number; successes: number }[] = []
   for (let i = 0; i < n; i++) {
-    const id = populationRowId(type, elementId, i)
+    const id = populationRowId(type, elementId, i, orgId)
     const s = stats.get(id) ?? { impressions: 0, successes: 0 }
     perVariant.push(s)
     totalImpressions += s.impressions
@@ -458,7 +588,7 @@ function sdkTrackingId(
 
 /**
  * Population-keyed row id - used for the persisted Intervention row, which
- * aggregates impressions/successes across all sessions. Stripping sessionId
+ * aggregates impressions/successes across sessions in one organization. Stripping sessionId
  * is what makes the bandit's stats lookup work: every session's render of
  * (type, element, variant) updates the same row.
  */
@@ -466,18 +596,10 @@ function populationRowId(
   type: StruggleType,
   elementId: string | null,
   variantIndex: number,
+  orgId: string,
 ): string {
-  const s = `${type}|${elementId ?? '_'}|v${variantIndex}`
-  let h1 = 0
-  let h2 = 0
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i)
-    h1 = (h1 << 5) - h1 + c
-    h2 = (h2 * 31 + c) | 0
-    h1 |= 0
-  }
-  const hex = (Math.abs(h1).toString(16) + Math.abs(h2).toString(16)).slice(0, 16).padEnd(16, '0')
-  return `iv_${hex}`
+  const key = JSON.stringify([orgId, type, elementId, variantIndex])
+  return `iv_${createHash('sha256').update(key).digest('hex')}`
 }
 
 /** For tests + previews: pull the first template from a struggle type. */
@@ -507,8 +629,9 @@ export function pickVariantBanditForTest(
   epsilon: number,
   minSamples: number,
   random?: () => number,
+  orgId = '',
 ): number {
-  return pickVariantBandit(sessionId, type, elementId, n, stats, epsilon, minSamples, random)
+  return pickVariantBandit(sessionId, type, elementId, n, stats, epsilon, minSamples, random, orgId)
 }
 
 /** Test-only access to the population row id. */
@@ -516,8 +639,9 @@ export function populationRowIdForTest(
   type: StruggleType,
   elementId: string | null,
   variantIndex: number,
+  orgId = '',
 ): string {
-  return populationRowId(type, elementId, variantIndex)
+  return populationRowId(type, elementId, variantIndex, orgId)
 }
 
 export type { InterventionRenderType }

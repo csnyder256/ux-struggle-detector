@@ -275,6 +275,65 @@ describe('detectStruggles - validation loop', () => {
   })
 })
 
+describe('detectStruggles - rage click uses a sliding window, not a prefix', () => {
+  it('fires on a burst that arrives late in a long click history', () => {
+    // 20 calm clicks spread over 5 minutes, then a real rage burst at the end.
+    // Only the trailing three sit inside the 2s window; a detector that only
+    // measures the FIRST three clicks of the session never sees it.
+    const events: RuntimeEvent[] = []
+    for (let i = 0; i < 20; i++) {
+      events.push(makeEvent({ tsOffsetMs: i * 15_000, eventType: 'CLICK', elementId: E1 }))
+    }
+    const burstStart = 20 * 15_000
+    events.push(makeEvent({ tsOffsetMs: burstStart, eventType: 'CLICK', elementId: E1 }))
+    events.push(makeEvent({ tsOffsetMs: burstStart + 300, eventType: 'CLICK', elementId: E1 }))
+    events.push(makeEvent({ tsOffsetMs: burstStart + 600, eventType: 'CLICK', elementId: E1 }))
+
+    const rage = detectStruggles(events).filter((d) => d.type === 'RAGE_CLICK')
+    expect(rage.length).toBe(1)
+    expect(rage[0]?.elementId).toBe(E1)
+    // The detection is reported at the burst, not at the start of the session.
+    expect(Date.parse(rage[0]!.ts)).toBe(Date.parse(makeEvent({ tsOffsetMs: burstStart + 600 }).ts))
+  })
+
+  it('still ignores three clicks that never fit in one window, however long the session', () => {
+    const events: RuntimeEvent[] = [
+      makeEvent({ tsOffsetMs: 0, eventType: 'CLICK', elementId: E1 }),
+      makeEvent({ tsOffsetMs: 60_000, eventType: 'CLICK', elementId: E1 }),
+      makeEvent({ tsOffsetMs: 120_000, eventType: 'CLICK', elementId: E1 }),
+      makeEvent({ tsOffsetMs: 180_000, eventType: 'CLICK', elementId: E1 }),
+    ]
+    expect(detectStruggles(events).filter((d) => d.type === 'RAGE_CLICK').length).toBe(0)
+  })
+})
+
+describe('detectStruggles - rage click baseline can only raise the bar', () => {
+  it('does not fire sooner on a calm element than on an element with no baseline', () => {
+    // A low p95 (0.1 clicks/sec) would compute an adapted threshold of 1, i.e.
+    // every single click is "rage". The static rule stays the floor.
+    const baselines = new Map([[E1 as string, { p95ClicksPerSec: 0.1, sampleSize: 40 }]])
+    const events: RuntimeEvent[] = [
+      makeEvent({ tsOffsetMs: 0, eventType: 'CLICK', elementId: E1 }),
+      makeEvent({ tsOffsetMs: 500, eventType: 'CLICK', elementId: E1 }),
+    ]
+    expect(
+      detectStruggles(events, { baselines }).filter((d) => d.type === 'RAGE_CLICK').length,
+    ).toBe(0)
+  })
+
+  it('fires at the third click even for a calm element', () => {
+    const baselines = new Map([[E1 as string, { p95ClicksPerSec: 0.1, sampleSize: 40 }]])
+    const events: RuntimeEvent[] = [
+      makeEvent({ tsOffsetMs: 0, eventType: 'CLICK', elementId: E1 }),
+      makeEvent({ tsOffsetMs: 500, eventType: 'CLICK', elementId: E1 }),
+      makeEvent({ tsOffsetMs: 1200, eventType: 'CLICK', elementId: E1 }),
+    ]
+    expect(
+      detectStruggles(events, { baselines }).filter((d) => d.type === 'RAGE_CLICK').length,
+    ).toBe(1)
+  })
+})
+
 describe('detectStruggles - hover hunt', () => {
   it('fires when many hovers happen in a window without a click', () => {
     const events: RuntimeEvent[] = [
@@ -401,4 +460,13 @@ describe('detectStruggles - help hunt', () => {
     e.meta = { role: 'help' }
     expect(detectStruggles([e]).some((d) => d.type === 'HELP_HUNT')).toBe(true)
   })
+})
+
+
+it('rage severity counts the burst and excludes unrelated earlier clicks', () => {
+  const burst = [100000, 100500, 101000].map((tsOffsetMs) => makeEvent({ tsOffsetMs, elementId: E1 }))
+  const sparse = Array.from({ length: 20 }, (_, i) => makeEvent({ tsOffsetMs: i * 3000, elementId: E1 }))
+  const rage = detectStruggles([...sparse, ...burst]).find((d) => d.type === 'RAGE_CLICK')!
+  expect(rage.severity).toBe(0.5)
+  expect(rage.summary).toMatch(/^3 clicks within /)
 })

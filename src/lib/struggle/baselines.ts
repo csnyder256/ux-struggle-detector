@@ -117,17 +117,67 @@ export async function computeBaselinesForOrg(orgId: string): Promise<BaselineCom
         if (before > 0) hoversBeforeClickPerSession.push(before)
       }
 
-      // Dwell durations from the DWELL events' meta.ms field. DWELLs fire
-      // every ~30s of inactivity from the SDK; the higher percentiles tell
-      // us what's normal for that surface.
-      const dwellMsValues: number[] = []
+      // Dwell durations from the DWELL events' meta.ms field. The SDK reports a
+      // continuing quiet stretch MORE THAN ONCE - it re-reports every second so
+      // an adapted (baseline-raised) threshold stays reachable - and each report
+      // carries the growing length of the stretch it belongs to. A 120s stare
+      // therefore arrives as ~111 rows (10s, 11s, ... 120s).
+      //
+      // Those rows are heartbeats of ONE event, not 111 separate events. Feeding
+      // each to the percentile independently lets a single long idle cast 111
+      // votes against a 10s idle's one vote, so p95 tracks stare length rather
+      // than typical behaviour - the baseline gets padded by exactly the element
+      // that was quiet longest. So group the rows by the stretch they belong to
+      // (SDK meta.stretch) and take ONE sample per stretch: its longest report.
+      //
+      // A stretch is identified by the PAIR (sessionId, meta.stretch), not by
+      // the stretch string alone. The SDK mints its stretch id client-side from
+      // a browser-local clock and a per-page counter, so nothing stops the
+      // identical string `st_abc_1` from appearing in more than one session -
+      // other tabs, other devices, other users. Grouping on the bare string
+      // would then fuse one quiet stretch from each of those sessions into a
+      // single sample, letting a 120s stare in some session swallow 99
+      // independent 10s stretches (and, worse, discarding the other sessions'
+      // samples outright). The session is the field that separates two
+      // client-local stretch identities, so it is part of the key.
+      //
+      // Both fields are opaque ingested strings, so the key must stay
+      // unambiguous when either contains whatever separator a plain join would
+      // use: `dwellStretchKey` serializes the pair with `JSON.stringify`, which
+      // quotes and escapes both fields and orders them by declared property
+      // ("session" then "stretch"). A joined-and-split implementation is
+      // ambiguous the moment a field can contain the separator; the JSON form
+      // is unambiguous for the same reason. A test that pins the difference
+      // lives in tests/baselines-dwell-grouping.test.ts.
+      //
+      // Legacy rows (written before the identity existed) have no meta.stretch.
+      // Each has no way to be tied to another, so each is its own stretch of the
+      // length it reports - which is the pre-identity behaviour, preserved
+      // rather than guessed at. A row that carries an identity is grouped by it
+      // even when it is the only row for that identity, so a mix of old and new
+      // data degrades one row at a time instead of collapsing.
+      const dwellByStretch = new Map<string, number>()
+      let legacyDwellIndex = 0
       for (const sessEvents of bySession.values()) {
         for (const e of sessEvents) {
           if (e.eventType !== 'DWELL') continue
-          const m = e.meta as { ms?: number } | null
-          if (typeof m?.ms === 'number' && m.ms > 0) dwellMsValues.push(m.ms)
+          const m = e.meta as { ms?: number; stretch?: unknown } | null
+          if (typeof m?.ms !== 'number' || m.ms <= 0) continue
+          // Untagged legacy rows are tied to nothing, not even to each other:
+          // one key per row (its own index), under a discriminant that no
+          // (session, stretch) pair can produce, so it can never merge with a
+          // tagged stretch.
+          const tagged = typeof m.stretch === 'string' && m.stretch.length > 0
+          const key = tagged
+            ? dwellStretchKey(e.sessionId, m.stretch as string)
+            : `legacy\u0000${legacyDwellIndex++}`
+          const previous = dwellByStretch.get(key)
+          // The longest report describes the whole stretch; earlier heartbeats
+          // are prefixes of it and contribute nothing on their own.
+          if (previous === undefined || m.ms > previous) dwellByStretch.set(key, m.ms)
         }
       }
+      const dwellMsValues: number[] = Array.from(dwellByStretch.values())
 
       const p95ClicksPerSec =
         clickRates.length > 0 ? percentile(clickRates, 0.95) : null
@@ -162,6 +212,23 @@ export async function computeBaselinesForOrg(orgId: string): Promise<BaselineCom
 
   result.ok = result.errorMessages.length === 0 || result.computed > 0
   return result
+}
+
+/**
+ * Collision-safe identity for one quiet stretch: the (session, stretch) pair.
+ *
+ * The SDK's `meta.stretch` is minted client-side and is only unique within one
+ * browser session, so the session is half the identity. Both fields are opaque
+ * strings that may contain any character, including whatever separator a plain
+ * join would pick, so the pair is serialized as an ordered JSON object -
+ * `JSON.stringify({ session: sessionId, stretch })`. `JSON.stringify` quotes
+ * both values and escapes their contents, and emits the properties in the
+ * declared order, so two distinct (session, stretch) pairs always serialize to
+ * two distinct strings. A joined-and-split implementation would instead have
+ * ('a', 'b|c') and ('a|b', 'c') collide on the key "a|b|c".
+ */
+function dwellStretchKey(sessionId: string, stretch: string): string {
+  return JSON.stringify({ session: sessionId, stretch })
 }
 
 function percentile(values: number[], p: number): number {

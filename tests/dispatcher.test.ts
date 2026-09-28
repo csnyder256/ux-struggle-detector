@@ -269,6 +269,105 @@ describe('dispatch payload - confidence + diagnostic', () => {
     expect(out.length).toBeGreaterThan(0)
   })
 
+  it('substitutes {route} into copy a user has to act on', () => {
+    // These three templates are meaningless without the route: a LOOP banner
+    // that says "here" about a page the user has forgotten, a CIRCULAR_NAV
+    // banner about "pages" with none named, and a NOT_FOUND_BOUNCE overlay
+    // pointing at "that page". Before this, {route} was the one documented
+    // template variable (library.ts header, {label} + {route}) that no
+    // template used, so the dispatcher rendered it into nothing.
+    const ctx = { safeMode: false, routeBySession: new Map([['sess_1', '/settings/billing']]) }
+
+    const loop = dispatchInterventions([det('LOOP', { elementId: null })], ctx)
+    expect(loop[0]?.copy).toContain('/settings/billing')
+    expect(loop[0]?.copy).not.toContain('{route}')
+
+    const circular = dispatchInterventions([det('CIRCULAR_NAV', { elementId: null })], ctx)
+    expect(circular[0]?.copy).toContain('/settings/billing')
+    expect(circular[0]?.copy).not.toContain('{route}')
+
+    const gone = dispatchInterventions([det('NOT_FOUND_BOUNCE', { elementId: null })], ctx)
+    expect(gone[0]?.copy).toContain('/settings/billing')
+    expect(gone[0]?.copy).not.toContain('{route}')
+  })
+
+  it('renders no unresolved placeholder when the route is unknown', () => {
+    // A batch can arrive with no NAVIGATION event and no hydrated history, so
+    // the session map is empty. An empty substitution reads as a broken
+    // sentence ("You've been back to  a few times") and a literal `{route}`
+    // reads as a bug the customer sees, so the phrase collapses to the part
+    // that is still true.
+    const out = dispatchInterventions([det('LOOP', { elementId: null })], { safeMode: false })
+    const copy = out[0]?.copy ?? ''
+    expect(copy).not.toContain('{route}')
+    expect(copy).not.toMatch(/back to\s+a few times/)
+    expect(copy).toContain('back here a few times')
+
+    const gone = dispatchInterventions([det('NOT_FOUND_BOUNCE', { elementId: null })], {
+      safeMode: false,
+    })
+    expect(gone[0]?.copy).not.toContain('{route}')
+    expect(gone[0]?.copy).not.toMatch(/^\s+is gone/)
+    expect(gone[0]?.copy).toContain('That page is gone')
+  })
+
+  it('treats a blank route as unknown rather than interpolating whitespace', () => {
+    const out = dispatchInterventions([det('LOOP', { elementId: null })], {
+      safeMode: false,
+      routeBySession: new Map([['sess_1', '']]),
+    })
+    expect(out[0]?.copy).toContain('back here a few times')
+  })
+
+  it('reads as a sentence with no route, for every template that names one', () => {
+    // The phrase-level fallbacks are only correct in the phrase they replace,
+    // so pin the finished string and assert the joins are clean. Reading the
+    // rendered copy is the only way this class of mistake shows up -
+    // `CIRCULAR_NAV` once rendered "Bouncing between pages between pages" and a
+    // `{route}`-only assertion was perfectly happy with it.
+    const cases: Array<[StruggleDetection['type'], string]> = [
+      ['LOOP', 'You&rsquo;ve been back here a few times - looking for something specific?'],
+      ['CIRCULAR_NAV', 'Bouncing between two pages - the action you might want is here.'],
+      ['NOT_FOUND_BOUNCE', 'That page is gone. Try the search bar - top of the page.'],
+    ]
+    for (const [type, expected] of cases) {
+      const copy =
+        dispatchInterventions([det(type, { elementId: null })], { safeMode: false })[0]?.copy ?? ''
+      expect(copy, type).toBe(expected)
+      // No doubled word where the route stood, no orphaned preposition, no gap.
+      expect(copy, type).not.toMatch(/between pages between|around\s*[-.]|^\s|\s\s/)
+    }
+  })
+
+  it('leaves no unfilled placeholder in any dispatched template', () => {
+    // Guard for the whole library rather than the three fixed templates: any
+    // future template that references a variable the dispatcher does not
+    // supply would ship `{something}` to a customer's page.
+    for (const type of ALL_STRUGGLE_TYPES) {
+      const out = dispatchInterventions(
+        [
+          {
+            sessionId: 'sess_1',
+            elementId: E1,
+            type,
+            severity: 0.5,
+            ts: '2026-05-01T12:00:00.000Z',
+          },
+        ],
+        {
+          safeMode: false,
+          routeBySession: new Map([['sess_1', '/checkout']]),
+          elementLabels: new Map([[E1 as string, 'Place order']]),
+          elementValidation: new Map([[E1 as string, { required: true }]]),
+        },
+      )
+      for (const d of out) {
+        expect(d.copy, `${type} copy`).not.toMatch(/\{[a-zA-Z]+\}/)
+        expect(d.title ?? '', `${type} title`).not.toMatch(/\{[a-zA-Z]+\}/)
+      }
+    }
+  })
+
   it('REQUIRED_MISSED template uses element validation rules in copy', () => {
     const targetId = 'sh_ffffffffffffffffffffffffffffffff' as ElementId
     const out = dispatchInterventions(
@@ -387,7 +486,7 @@ describe('dispatchInterventionsWithRows', () => {
       { safeMode: false },
     )
     expect(out.length).toBe(1)
-    expect(out[0]?.rowId).toMatch(/^iv_[0-9a-f]{1,16}$/)
+    expect(out[0]?.rowId).toMatch(/^iv_[0-9a-f]{64}$/)
     expect(out[0]?.variantGroup).toBe('RAGE_CLICK')
     expect(typeof out[0]?.variantIndex).toBe('number')
   })
@@ -454,6 +553,57 @@ describe('dispatchInterventionsWithRows', () => {
       expect(a[0]?.rowId).toBe(b[0]?.rowId)
       expect(a[0]?.id).not.toBe(b[0]?.id)
     }
+  })
+})
+
+describe('dispatchInterventions - validation copy', () => {
+  function copyFor(validation: Record<string, unknown>): string {
+    const out = dispatchInterventions([det('FORMAT_ERROR')], {
+      safeMode: false,
+      elementLabels: new Map([[E1 as string, 'Tax ID']]),
+      elementValidation: new Map([[E1 as string, validation]]),
+    })
+    return out[0]?.copy ?? ''
+  }
+
+  it('renders the reconstructed constraint instead of a bare label', () => {
+    // The FORMAT_ERROR template is `{label} {validation}.` - with no
+    // recognised rules the sentence renders as "Tax ID ."
+    expect(copyFor({ inputType: 'email' })).toBe('Tax ID needs valid email.')
+  })
+
+  it('prefers the message the customer wrote for the field', () => {
+    const copy = copyFor({
+      inputType: 'email',
+      customValidity: 'That VAT ID is not the right length for this country.',
+    })
+    expect(copy).toContain('That VAT ID is not the right length for this country.')
+    expect(copy).not.toContain('valid email')
+  })
+
+  it('names a native constraint failure the rules alone could not describe', () => {
+    expect(copyFor({ customError: true })).toBe('Tax ID needs a valid value.')
+    expect(copyFor({ rangeUnderflow: true, min: 18 })).toBe('Tax ID needs at least 18.')
+    expect(copyFor({ rangeOverflow: true, max: 120 })).toBe('Tax ID needs at most 120.')
+    // A step with no `min` is anchored at 0 by the browser, so 0, 5, 10 are
+    // the values it actually accepts.
+    expect(copyFor({ stepMismatch: true, step: 5 })).toBe('Tax ID needs one of 0, 5, 10, 15, ….')
+    expect(copyFor({ badInput: true })).toBe('Tax ID needs a number.')
+  })
+
+  it('does not repeat one description twice', () => {
+    // `pattern` and `patternMismatch` both describe "a valid format".
+    expect(copyFor({ pattern: '^\\d+$', patternMismatch: true })).toBe(
+      'Tax ID needs a valid format.',
+    )
+  })
+
+  it('keeps the bare-label render only when nothing is known about the field', () => {
+    const out = dispatchInterventions([det('FORMAT_ERROR')], {
+      safeMode: false,
+      elementLabels: new Map([[E1 as string, 'Tax ID']]),
+    })
+    expect(out[0]?.copy).toBe('Tax ID .')
   })
 })
 
@@ -715,5 +865,34 @@ describe('cached variants (pre-computed interventions)', () => {
       { safeMode: false, cachedVariants: cached },
     )
     expect(out[0]?.helpCopy).toBe('Make sure it looks like name@example.com.')
+  })
+})
+
+
+describe('organization-scoped feedback', () => {
+  it('keeps the population row in the SDK response and isolates organizations', () => {
+    const detection = det('RAGE_CLICK')
+    const a = dispatchInterventions([detection], { safeMode: false, orgId: 'org-a' })[0]!
+    const b = dispatchInterventions([detection], { safeMode: false, orgId: 'org-b' })[0]!
+    expect(a.rowId).toMatch(/^iv_[0-9a-f]{64}$/)
+    expect(a.rowId).not.toBe(b.rowId)
+    const nextSession = { ...detection, sessionId: 'another-session' }
+    // A single cached variant makes the population key independent of session selection.
+    const cachedVariants = new Map([[`${E1}|RAGE_CLICK`, [{ type: 'TOOLTIP' as const, copy: 'Help' }]]])
+    const first = dispatchInterventions([detection], { safeMode: false, orgId: 'org-a', cachedVariants })[0]!
+    const second = dispatchInterventions([nextSession], { safeMode: false, orgId: 'org-a', cachedVariants })[0]!
+    expect(first.rowId).toBe(second.rowId)
+    expect(first.id).not.toBe(second.id)
+  })
+
+  it('learns only from the owning organization’s population rows', () => {
+    const stats = new Map([
+      [populationRowIdForTest('LOOP', E1, 0, 'org-a'), { impressions: 100, successes: 99 }],
+      [populationRowIdForTest('LOOP', E1, 1, 'org-a'), { impressions: 100, successes: 1 }],
+      [populationRowIdForTest('LOOP', E1, 0, 'org-b'), { impressions: 100, successes: 1 }],
+      [populationRowIdForTest('LOOP', E1, 1, 'org-b'), { impressions: 100, successes: 99 }],
+    ])
+    expect(pickVariantBanditForTest('s', 'LOOP', E1, 2, stats, 0, 30, () => 0.5, 'org-a')).toBe(0)
+    expect(pickVariantBanditForTest('s', 'LOOP', E1, 2, stats, 0, 30, () => 0.5, 'org-b')).toBe(1)
   })
 })

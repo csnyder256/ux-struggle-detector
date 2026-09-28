@@ -333,6 +333,12 @@ function readValidation(attrs: Record<string, string>, tagName: string): Validat
   if (attrs.pattern) v.pattern = attrs.pattern
   if (attrs.step) v.step = Number.isNaN(Number(attrs.step)) ? attrs.step : Number(attrs.step)
   if (tagName === 'input' && attrs.type) v.inputType = attrs.type
+  // Note: no validity flags are read from markup here, and none can be.
+  // `setCustomValidity`, `badInput`, `customError` and the rest are runtime
+  // state a page produces by calling browser APIs on a live element - they are
+  // not markup attributes and never appear in a source file. The SDK captures
+  // them off the real element (see the `validationMessage` it sends with a
+  // failing event), and that is the only path by which they reach the server.
   return v
 }
 

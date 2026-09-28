@@ -304,7 +304,7 @@
     <ul class="plain">
       <li><b>The system has to know what the UI is, before anyone uses it.</b> "The user rage-clicked element <code>sh_9f3c...</code>" is useless. "The user rage-clicked the Save Tax Settings button on <code>/settings/billing</code>" is actionable. So the frontend is ingested and mapped first.</li>
       <li><b>Struggle spans HTTP requests.</b> Rage clicks fit in one event batch. Circular navigation, back-button thrash, and dead ends do not. A detector that only sees the incoming batch will never fire those rules and will still look like it works. The ingest route hydrates up to 1,000 stored events from a 5-minute lookback before running detection.</li>
-      <li><b>Getting it wrong is worse than doing nothing.</b> Safe mode is on by default and time-boxed via <code>safeModeUntil</code>, invasive intervention types are allowlist-gated, sensitive routes have a denylist, and detection thresholds adapt per element from nightly p95 baselines instead of using one global constant.</li>
+      <li><b>Getting it wrong is worse than doing nothing.</b> Safe mode is on by default and time-boxed via <code>safeModeUntil</code>, invasive intervention types are allowlist-gated, sensitive routes have a denylist, and detection thresholds adapt per element from nightly p95 baselines instead of using one global constant. The baselines may only make a detector <em>less</em> eager, never more: a p95 low enough to compute a rage-click threshold of one click still leaves the static "3 clicks in 2s" rule as the floor, because the calm element is exactly the one where a false positive lands on a consequential screen. That floor is enforced by <code>Math.max</code> against the static rule and has been since the detector was written.</li>
     </ul>
   </section>
 
@@ -352,11 +352,11 @@ POST /api/events -> persist (idempotent)
         <tbody>
           <tr><td>src/lib/struggle/detect.ts</td><td>1,182</td><td>the 40 detection rules, each a pure function</td></tr>
           <tr><td>src/lib/parsers/react.ts</td><td>797</td><td>Babel JSX extraction</td></tr>
-          <tr><td>src/app/api/events/route.ts</td><td>714</td><td>ingest, hydrate, detect, dispatch</td></tr>
+          <tr><td>src/app/api/events/route.ts</td><td>639</td><td>ingest, hydrate, detect, dispatch</td></tr>
           <tr><td>src/lib/parsers/universal-html.ts</td><td>703</td><td>template scan for non-React families</td></tr>
           <tr><td>prisma/schema.prisma</td><td>666</td><td>23 models, 10 enums, 4 applied migrations</td></tr>
-          <tr><td>src/sdk/index.ts</td><td>651</td><td>capture loop and init</td></tr>
-          <tr><td>src/sdk/renderers.ts</td><td>640</td><td>12 intervention renderers</td></tr>
+          <tr><td>src/sdk/index.ts</td><td>771</td><td>capture loop and init</td></tr>
+          <tr><td>src/sdk/renderers.ts</td><td>719</td><td>12 intervention renderers</td></tr>
           <tr><td>src/lib/parsers/registry.ts</td><td>609</td><td>46 framework entries, 22 families</td></tr>
           <tr><td>src/lib/interventions/dispatcher.ts</td><td>523</td><td>variant selection and gating</td></tr>
         </tbody>
@@ -419,7 +419,7 @@ pnpm dev</code></pre>
           <tr><td>SDK capture</td><td class="tag">built</td><td>15 event types, scrub, buffer, sampling</td></tr>
           <tr><td>SDK renderers</td><td class="tag">partial</td><td>12 of 15 types; TOUR renders as a modal</td></tr>
           <tr><td>DOM / BEHAVIOR / AUTO_FIX</td><td class="tag">not built</td><td>gated in the dispatcher; nothing rewrites a customer's DOM</td></tr>
-          <tr><td>40 detection rules + baselines</td><td class="tag">built</td><td>per-element adaptive thresholds</td></tr>
+          <tr><td>40 detection rules + baselines</td><td class="tag">built</td><td>per-element adaptive thresholds; the static rule is a floor, so a baseline can only raise a threshold, never lower it</td></tr>
           <tr><td>Dispatch, denylist, safe mode</td><td class="tag">built</td><td>bandit with deterministic fallback</td></tr>
           <tr><td>SaaS shell</td><td class="tag">built</td><td>magic-link auth, onboarding, 11 dashboard pages, metering</td></tr>
           <tr><td>Event type persistence</td><td class="tag">partial</td><td>SDK emits 15 types, the DB enum stores 7</td></tr>

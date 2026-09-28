@@ -75,6 +75,13 @@ export interface ElementContext {
   valueLength?: number
   /** For inputs: validity flags (`valueMissing` / `typeMismatch` etc, comma-joined). */
   validity?: string
+  /**
+   * For inputs failing a page-set custom validity: the message the page itself
+   * passed to `setCustomValidity()`. The browser owns that string and it is
+   * lost on reload, so it has to travel with the validation failure event -
+   * this is the only copy the server can render back to the user.
+   */
+  validationMessage?: string
   /** True if the element is currently disabled. */
   disabled?: boolean
   /** True if the element has no click/submit/change handler we could detect. */
@@ -120,6 +127,22 @@ export interface EventBatchResponse {
 export interface DispatchedIntervention {
   /** Stable id so the SDK can avoid showing the same one twice in one session. */
   id: string
+  /**
+   * Database id of the persisted `Intervention` row. The outcome events the
+   * SDK reports (`shown` / `dismissed` / `success`) are keyed on this, because
+   * `/api/events` resolves them with `prisma.intervention.update({ where: {
+   * id } })` against the row. It is absent for a locally-rendered intervention
+   * (the SDK's own rage-click fallback) and for any shape a host builds itself,
+   * in which case the SDK falls back to `id`.
+   *
+   * The wire payload always carries it: the SDK's `id` is session-keyed
+   * (`iv_` + hash of session/type/element/variant) so it is stable per browser
+   * session and differs across sessions, while the row is population-keyed
+   * (`iv_` + SHA-256 of org/type/element/variant) so it aggregates impressions across
+   * every session. Server code strips both this and `variantGroup` /
+   * `variantIndex` only from the *dashboard* view, never from the SDK response.
+   */
+  rowId?: string
   type: InterventionRenderType
   /** Element to anchor the intervention to (highlight target etc.). */
   targetElementId: ElementId | null

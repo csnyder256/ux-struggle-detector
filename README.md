@@ -6,7 +6,6 @@
 ![TypeScript](https://img.shields.io/badge/typescript-5.6%20strict-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![Next.js](https://img.shields.io/badge/next.js-15%20app%20router-000000?style=flat-square&logo=nextdotjs&logoColor=white)
 ![Prisma](https://img.shields.io/badge/prisma-5%20%2F%20postgres-2D3748?style=flat-square&logo=prisma&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-179%20across%2010%20files-brightgreen?style=flat-square)
 ![Detection rules](https://img.shields.io/badge/struggle%20rules-40-orange?style=flat-square)
 ![SDK](https://img.shields.io/badge/browser%20SDK-26%20KB%20minified-informational?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
@@ -16,7 +15,7 @@ Built under the product name **Clarus Heal**. It maps a customer's web app UI, e
 Three pillars:
 
 1. **Map the UI first.** Framework detection across 46 registry entries in 22 families, a Babel AST parser for React and Preact, a universal template scanner for everything else, plus an LLM pass that gives each element a semantic name and intent.
-2. **Watch from the browser.** A dependency-free SDK (about 1,740 lines, 26 KB minified) capturing 15 event types with client-side PII masking, offline buffering, and sampling.
+2. **Watch from the browser.** A dependency-free SDK  capturing 15 event types with client-side PII masking, offline buffering, and sampling.
 3. **Decide and intervene server-side.** 40 detection rules over hydrated session history, then a bandit-driven dispatcher that returns an overlay, tooltip, or hint inline.
 
 ---
@@ -72,7 +71,7 @@ Every extracted element gets a deterministic ID (`sh_` plus 32 hex chars) from `
 
 ### Pillar 2: the browser SDK
 
-`src/sdk/` is nine files, roughly 1,740 lines, zero runtime dependencies, bundled by esbuild into an IIFE at `public/sdk.min.js` (26,166 bytes; the unminified `sdk.js` is 46,488).
+`src/sdk/` has zero runtime dependencies and is bundled by esbuild into `public/sdk.js` and `public/sdk.min.js`. Both bundles are rebuilt from the reviewed source.
 
 ```html
 <script src="https://your-deployment/sdk.min.js"></script>
@@ -85,9 +84,11 @@ Every extracted element gets a deterministic ID (`sh_` plus 32 hex chars) from `
 </script>
 ```
 
-There is also a one-line auto-init form: a `<script>` tag carrying `data-org-id` is picked up by `readAutoInitOptions()` (`src/sdk/index.ts:563`), so no second script block is needed.
+There is also a one-line auto-init form: a `<script>` tag carrying `data-org-id` is picked up by `readAutoInitOptions()` (`src/sdk/index.ts:683`), so no second script block is needed.
 
-It captures 15 event types (click, input change, submit, navigation, hover, scroll, dwell, paste, copy, focus, blur, keydown, JS error, validation error, custom), buffers to survive offline, and supports uniform, per-type, and predicate-based sampling.
+It captures 15 event types (click, input change, submit, navigation, hover, scroll, dwell, paste, copy, focus, blur, keydown, JS error, validation error, custom), buffers to survive offline, and supports uniform, per-type, and predicate-based sampling. A dwell is checked once a second and reported when the user has been quiet for 10s, so a 15s or 30s idle threshold is detected about when it happens rather than up to half a minute late. Each report carries the quiet stretch it belongs to (`meta.stretch`) and grows as that stretch continues, so a long idle can still clear a baseline-raised threshold and a resumed interaction starts a fresh stretch. Because one stretch is therefore many rows, the per-element dwell baseline groups by `meta.stretch` and takes one sample per stretch - a single 120s stare must not out-vote 99 separate 10s stares just by having been reported 111 times.
+
+A `DWELL` names the element the user was last *interacting* with - a click, a typed field, a submit - and only falls back to the element the pointer was left hovering when there is no interaction to name. That ordering matters more than it looks: the server keys both the per-element `p95DwellMs` baseline and the intervention target on the id the dwell carries, so attributing a quiet stretch to whatever the mouse happened to be resting on does not merely mislabel a row - it applies an adapted threshold to an element the user was never stuck on. Hovers are emitted with a `null` element id for the same reason, and the hover is held aside until a report is actually due, so a pointer gliding across the page mid-stretch cannot steal the attribution.
 
 It does not care what the host app is built with. Listeners sit at the document level, so it needs no framework hooks. Navigation is followed through `pushState`, `replaceState` (only when the route changes) and the back/forward buttons. For hash-mode routers (`#/cart`, AngularJS `#!/cart`), the route comes from the fragment, so those screens are not all reported as `/`. Where the browser has the Navigation API, a forward move to a new fragment is kept apart from a real back-button press, so clicking through hash links never reads as back-button thrash. Calling `initSelfHealing()` during a server render is a no-op, so frameworks that render on the server can call it from shared code.
 
@@ -95,11 +96,18 @@ Honest wrinkle: **the SDK emits 15 event types; the Prisma `EventType` enum pers
 
 **The PII scrubber runs before anything leaves the page.** `src/sdk/scrubber.ts` holds 15 regex patterns in `DEFAULT_PATTERNS`, masking emails, credit-card-shaped digit runs, US SSNs, US and international phone numbers, IBANs, IPv4 and IPv6 addresses, JWTs, AWS access key IDs, GitHub tokens, Stripe keys, and Anthropic/OpenAI-shaped keys, with customer-supplied extra patterns merged in. The masking happens client-side by design: a scrubber that runs on the server has already lost.
 
-12 of the 15 `InterventionType` values have an SDK renderer. `DOM`, `BEHAVIOR` and `AUTO_FIX` have none, by design. `TOUR` is a stub: it renders as a modal, because multi-step `TourConfig` steps are not populated by the dispatcher yet (`src/sdk/renderers.ts:553`).
+12 of the 15 `InterventionType` values have an SDK renderer. `DOM`, `BEHAVIOR` and `AUTO_FIX` have none, by design. `TOUR` is a stub: it renders as a modal, because multi-step `TourConfig` steps are not populated by the dispatcher yet (`src/sdk/renderers.ts:623`).
+
+Every renderer draws inline-styled DOM under one root container and works out its own geometry with `getBoundingClientRect()`. Three properties of that fall out of the tests in `sdk-renderers.test.ts`, and each of them was a defect before it was a property:
+
+- **Anchored panels stay inside the viewport.** `TOOLTIP`, `INLINE_HINT` and `ARROW` place themselves relative to their target, and clamp into the viewport when that target sits at an edge. An unclamped placement renders off-screen, which a user cannot tell apart from an intervention that never rendered at all.
+- **`SPOTLIGHT` uses a viewport-sized fixed overlay with an even-odd clip.** Its rectangular hole follows the target's viewport geometry, including after scrolling.
+- **Feedback carries both IDs end to end.** `id` is session-keyed for deduplication; `rowId` is SHA-256 over organization, struggle, element and variant for population feedback. The API retains `rowId` in its SDK response and scopes outcome writes to the authenticated organization. Old unscoped rows remain historical; new rows accumulate organization-scoped statistics. Element-free interventions currently have no persisted feedback row.
+- **Validation copy stays within its session and renders as text.** The SDK removes an echoed field value and scrubs recognized PII before uploading a validation message. It remains a pattern-based scrubber, not a guarantee that every possible personal datum can be recognized.
 
 ### Pillar 3: detection and intervention
 
-`src/app/api/events/route.ts` (714 lines) is the hot path. Per batch it authenticates the org against a hashed ingest key, Zod-validates against a versioned wire schema (`EVENT_SCHEMA_VERSION` is 3 and versions 1 and 2 are still accepted, so old cached SDK bundles in customers' browsers keep working through a rollout), persists, hydrates up to 1,000 stored events from a 5-minute lookback for the sessions in the batch, loads per-element baselines, runs the detector, records outcomes from prior impressions, and dispatches interventions inline.
+`src/app/api/events/route.ts` is the hot path. Per batch it authenticates the org against a hashed ingest key, Zod-validates against a versioned wire schema (`EVENT_SCHEMA_VERSION` is 3 and versions 1 and 2 are still accepted, so old cached SDK bundles in customers' browsers keep working through a rollout), persists, hydrates up to 1,000 stored events from a 5-minute lookback for the sessions in the batch, loads per-element baselines, runs the detector, records outcomes from prior impressions, and dispatches interventions inline.
 
 **Idempotent ingest by construction.** A `(orgId, idempotencyKey)` unique index plus `createMany({ skipDuplicates: true })` means the SDK offline replay buffer can retry as aggressively as it likes with zero server-side dedup logic.
 
@@ -116,11 +124,13 @@ Honest wrinkle: **the SDK emits 15 event types; the Prisma `EventType` enum pers
 | Auth (2) | `LOGIN_FAILURE`, `LOCKED_OUT` |
 | Other (3) | `KEYBOARD_LOST_FOCUS`, `COPY_BOUNCE`, `HELP_HUNT` |
 
-Detection thresholds are not constants. A nightly cron computes p95 click-rate, dwell, and hover baselines per element, and the detector consumes them, so a noisy game button gets a higher rage-click threshold than a Delete button.
+Detection thresholds are not constants. A nightly cron computes p95 click-rate, dwell, and hover baselines per element, and the detector consumes them, so a noisy game button gets a higher rage-click threshold than a Delete button. A baseline can only move a threshold in the direction of caution, and always could: `Math.max` against the static rule means an element whose history suggests a *lower* bar keeps the static one, because under-firing on a quiet element is a missed hint while over-firing on it is an intervention the customer sees on a page where the user was never stuck.
 
 `src/lib/interventions/dispatcher.ts` (523 lines) picks what to show. It runs an epsilon-greedy multi-armed bandit (epsilon 0.1) over copy variants, weighted by empirical success rate with Laplace smoothing. `pickVariantDeterministic` takes over in two cases: below `banditMinSamples` (30) total impressions, and whenever the stats map is absent entirely. That guarantees both early exploration and reproducible unit tests. The RNG is injectable. The dispatcher honors a per-route denylist and per-intervention pause flags, and prefers LLM-precomputed copy from an `InterventionCache` over the 42 in-code templates in `library.ts`. The allowlist that makes this safe is enforced upstream, at cache-write time: the precompute worker only ever writes cache rows for the eight types in `VALID_RENDERER_TYPES` (`src/lib/interventions/precompute.ts:159`) - `OVERLAY`, `HIGHLIGHT`, `TOOLTIP`, `MODAL`, `BANNER`, `INLINE_HINT`, `CONFIRM`, `ANNOUNCE` - so invasive types can never be served from cache.
 
 The loop closes: the SDK reports shown, dismissed, and success back as `CUSTOM` events carrying the intervention row ID, which increments counters, recomputes `successRate`, writes a per-session impression row, and feeds the bandit's next pick.
+
+The three templates whose copy is only useful if it names the page - the `LOOP` banner, the `CIRCULAR_NAV` banner, and the `NOT_FOUND_BOUNCE` overlay - now interpolate `{route}`. `{route}` was documented as a template variable in `library.ts` from the start and filled in by `render()` the whole time; no template referenced it, so the copy told the user they had "been here a few times" about a page they had since forgotten, and that "that page is gone" without saying which page. The route is the session's known route, so it is resolved server-side from the same map the denylist uses and needs nothing from the SDK. When a batch arrives with no `NAVIGATION` event and no hydrated history the route is genuinely unknown, and fixing the gap with an empty substitution would produce "You've been back to  a few times" - worse than the vaguer original sentence. So the phrase collapses to the part that is still true ("back here a few times", "That page is gone") rather than leaving a hole or leaking a raw `{route}`, with a test over the whole template library so no future template can ship a placeholder the dispatcher does not fill.
 
 ## Other things worth a look
 
@@ -135,11 +145,11 @@ The loop closes: the SDK reports shown, dismissed, and success back as `CUSTOM` 
 | --- | --- | --- |
 | `src/lib/struggle/detect.ts` | 1,182 | the 40 detection rules |
 | `src/lib/parsers/react.ts` | 797 | Babel JSX extraction |
-| `src/app/api/events/route.ts` | 714 | ingest, hydrate, detect, dispatch |
+| `src/app/api/events/route.ts` | 639 | ingest, hydrate, detect, dispatch |
 | `src/lib/parsers/universal-html.ts` | 703 | template scan for non-React families |
 | `prisma/schema.prisma` | 666 | 23 models, 10 enums |
-| `src/sdk/index.ts` | 651 | SDK capture loop and init |
-| `src/sdk/renderers.ts` | 640 | 12 intervention renderers |
+| `src/sdk/index.ts` | 771 | SDK capture loop and init |
+| `src/sdk/renderers.ts` | 719 | 12 intervention renderers |
 | `src/lib/parsers/registry.ts` | 609 | 46 framework entries, 22 families |
 | `src/lib/interventions/dispatcher.ts` | 523 | variant selection and gating |
 
@@ -198,45 +208,55 @@ src/
     enrichment/        LLM passes over elements and routes
     providers/         ModelProvider interface + anthropic / openai
     crypto/ auth/ usage/ github/ db/ access.ts
-  sdk/                 dependency-free browser SDK (9 files, ~1,740 LOC)
+  sdk/                 dependency-free browser SDK
   components/          hand-written shadcn-style primitives (no Radix dependency)
 prisma/                schema.prisma, 4 applied migrations
-tests/                 10 Vitest files, 165 tests
+tests/                 Vitest unit, DOM and Chromium coverage
 scripts/               setup.sh, setup.ps1
 public/                sdk.js, sdk.min.js (checked-in esbuild output), demo/
 ```
 
-20,493 lines of TypeScript and TSX across 115 files in `src/` and `tests/`. Dashboard reads go through server components and mutations through inline server actions; there is deliberately no REST layer for the dashboard, only for SDK ingest and webhooks.
+22,032 lines of TypeScript and TSX across 125 files in `src/` and `tests/`. Dashboard reads go through server components and mutations through inline server actions; there is deliberately no REST layer for the dashboard, only for SDK ingest and webhooks.
 
 The four migration directory names read as the project's phase history: `init`, `expand_enums`, `platform_config_allowlists`, `phase_25_events_and_sampling`.
 
 `pnpm-workspace.yaml` exists at the root but contains only a build flag (`allowBuilds: esbuild: false`). There are no workspace packages. This is one Next.js application, deliberately, not a half-finished monorepo.
 
+Differs from `readValidation` in `react.ts` only in how the platform attributes behave. Both read the markup that genuinely exists: text, numeric range (`min`/`max`), `step`, `minLength`/`maxLength`, `pattern`, and `inputType`. Neither reads a validity flag, because none can: `setCustomValidity`, `customError`, `badInput` and the rest of the `ValidityState` set are runtime state a page produces by calling browser APIs on a live element, not attributes in a source file. They reach the server the only way they can - the SDK captures them off the real element and sends `element.validity` and `element.validationMessage` with the failing event. The dispatcher renders that into the `{validation}` slot of the copy templates, preferring the page's own message, so a field that fails only `rangeUnderflow` gets "needs at least 18" and a field the page gave a custom message shows that message instead of a generic one.
+
 ## Testing
 
-187 tests across 13 Vitest files.
+Run `pnpm test` for the current test inventory. The suite covers unit logic, SDK DOM flows and a real Chromium capture-to-dispatch flow.
 
-| File | Tests | Covers |
-| --- | --- | --- |
-| `sdk.test.ts` | 45 | PII scrubbing, buffering, sampling, route tracking |
-| `dispatcher.test.ts` | 40 | variant selection, bandit behavior, copy substitution |
-| `struggle.test.ts` | 33 | detection rules |
-| `react-parser.test.ts` | 12 | Babel JSX extraction |
-| `crawler.test.ts` | 11 | HTML crawl |
-| `ui-map.test.ts` | 11 | ElementId determinism |
-| `universal-parser.test.ts` | 10 | template scan across families |
-| `playwright-crawler.test.ts` | 6 | SPA crawl |
-| `crypto.test.ts` | 6 | AES-GCM round trip and tamper detection |
-| `dispatcher-denylist.test.ts` | 5 | route denylist |
-| `email-sign-in.test.ts` | 4 | magic-link delivery over SMTP, sign-in address rules |
-| `ingest-schema.test.ts` | 3 | over-long page text is cut, not a rejected batch |
-| `session-payload.test.ts` | 1 | `/api/auth/session` never exposes the session token |
+| File | Covers |
+| --- | --- |
+| `sdk.test.ts` | PII scrubbing, buffering, sampling, route tracking |
+| `dispatcher.test.ts` | variant selection, bandit behavior, copy substitution |
+| `struggle.test.ts` | detection rules, sliding windows, adaptive thresholds |
+| `react-parser.test.ts` | Babel JSX extraction, validation rules |
+| `crawler.test.ts` | HTML crawl |
+| `ui-map.test.ts` | ElementId determinism |
+| `universal-parser.test.ts` | template scan across families |
+| `playwright-crawler.test.ts` | SPA crawl |
+| `crypto.test.ts` | AES-GCM round trip and tamper detection |
+| `dispatcher-denylist.test.ts` | route denylist |
+| `email-sign-in.test.ts` | magic-link delivery over SMTP, sign-in address rules |
+| `sdk-scrubber-phone-bounds.test.ts` | phone-pattern bounds: suffix of a longer digit run is not redacted |
+| `ingest-schema.test.ts` | over-long page text is cut, not a rejected batch |
+| `session-payload.test.ts` | `/api/auth/session` never exposes the session token |
+| `sdk-dwell-backend.test.ts` | SDK dwell timer driven against a real DOM, its events fed to the real detector |
+| `sdk-dwell-stretch-flow.test.ts` | SDK stretch identity through the wire schema into the real baseline grouping |
+| `baselines-dwell-grouping.test.ts` | dwell p95 weighted per quiet stretch, not per heartbeat row |
+| `sdk-validity-flow.test.ts` | runtime `setCustomValidity` capture through ingest into rendered copy |
+| `browser-evidence.test.ts` | real headless Chromium: browser constraint API, SDK capture, ingest and dispatcher |
+
+The SDK DOM suites run against a live jsdom document, which is a DOM implementation, not a browser. jsdom implements `setCustomValidity` and the constraint API well enough to drive the SDK's real code path, but it does **not** compute `badInput`, and it is not proof of browser behaviour. `sdk-validity-flow.test.ts` therefore mocks the `badInput` validity state (installing both `validity` and `checkValidity` so the two agree) and says so in the test; the real-browser observation is recorded separately in `docs/browser-evidence.md`, captured with headless Chromium against the built SDK.
 
 Coverage is concentrated on the pure, high-risk core: detection rules, dispatcher selection, both parser families, the crypto boundary, and the ElementId hash contract. Those are the components where a silent regression would degrade the product invisibly instead of breaking loudly.
 
-**What is not covered:** there is no integration test that exercises `/api/events` end to end against a real database, there are no browser or E2E tests (Playwright is a crawling dependency here, not a test runner), and the dashboard's React pages are untested.
+**What is not covered:** there is no integration test that exercises `/api/events` end to end against a real database, the Chromium test uses an ingest fixture rather than a real database, and the dashboard's React pages are untested.
 
-CI (`.github/workflows/ci.yml`) runs on push to main and on every PR: Node 22 and pnpm 10 with a cached store, then `prisma generate`, `typecheck`, `lint`, `test`, both SDK bundles (failing if the checked-in copies are stale), and a production `pnpm build`. There is no Postgres service container, which is consistent with the suite being unit-level only.
+CI (`.github/workflows/ci.yml`) runs on push to main and on every PR: Node 22 and pnpm 10 with a cached store, then `prisma generate`, `typecheck`, `lint`, `test`, both SDK bundles (failing if the checked-in copies are stale), and a production `pnpm build`. There is no Postgres service container, the browser flow uses an ingest fixture.
 
 ## Status
 
@@ -256,7 +276,7 @@ CI (`.github/workflows/ci.yml`) runs on push to main and on every PR: Node 22 an
 | SaaS shell | Built | magic-link auth, onboarding wizard, 11 dashboard pages, usage metering, encrypted key storage |
 | Scheduled workers | Built | three Vercel crons behind `CRON_SECRET` |
 | Event type persistence | Partial | SDK emits 15 types, the `EventType` enum stores 7 |
-| Integration / E2E tests | Not built | unit tests only |
+| Real database integration | Not built | Chromium capture and dispatch are exercised with an ingest fixture |
 | Monorepo split | Not planned | single app; workspace file exists only for a build flag |
 
 ## About this public copy

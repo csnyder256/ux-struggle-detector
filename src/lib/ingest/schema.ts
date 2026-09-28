@@ -38,6 +38,7 @@ const ElementContextSchema = z
     dirty: z.boolean().optional(),
     valueLength: z.number().int().nonnegative().optional(),
     validity: clipped(200).optional(),
+    validationMessage: clipped(200).optional(),
     disabled: z.boolean().optional(),
     dead: z.boolean().optional(),
   })
@@ -81,7 +82,22 @@ const RuntimeEventSchema = z.object({
     'CUSTOM',
   ]),
   ts: z.string().datetime(),
-  meta: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+  /**
+   * Event metadata. `DWELL` events carry two reserved keys that the per-element
+   * baseline depends on and that a transport test therefore pins:
+   *   - `ms`      - the quiet-stretch length this report describes, in ms.
+   *   - `stretch` - an opaque id shared by every report of one quiet stretch.
+   * The baseline groups by `stretch` and takes one sample per stretch, so the
+   * id must survive the wire unchanged; a report that lost it would be counted
+   * as its own stretch and re-introduce the padding the id exists to prevent.
+   */
+  meta: z
+    .record(z.union([z.string(), z.number(), z.boolean(), z.null()]))
+    .refine(
+      (m) => !('stretch' in m) || m.stretch === null || typeof m.stretch === 'string',
+      { message: 'meta.stretch must be a string when present' },
+    )
+    .optional(),
   page: PageContextSchema,
   element: ElementContextSchema,
 })
@@ -91,3 +107,6 @@ export const BatchSchema = z.object({
   clockOffsetMs: z.number(),
   events: z.array(RuntimeEventSchema).max(500),
 })
+
+/** Exported so a transport/ingest test can assert one event's accepted shape. */
+export const RuntimeEventSchemaExport = RuntimeEventSchema
