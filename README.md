@@ -6,7 +6,7 @@
 ![TypeScript](https://img.shields.io/badge/typescript-5.6%20strict-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![Next.js](https://img.shields.io/badge/next.js-15%20app%20router-000000?style=flat-square&logo=nextdotjs&logoColor=white)
 ![Prisma](https://img.shields.io/badge/prisma-5%20%2F%20postgres-2D3748?style=flat-square&logo=prisma&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-179%20across%2010%20files-brightgreen?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-192%20across%2013%20files-brightgreen?style=flat-square)
 ![Detection rules](https://img.shields.io/badge/struggle%20rules-40-orange?style=flat-square)
 ![SDK](https://img.shields.io/badge/browser%20SDK-26%20KB%20minified-informational?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
@@ -122,6 +122,8 @@ Detection thresholds are not constants. A nightly cron computes p95 click-rate, 
 
 The loop closes: the SDK reports shown, dismissed, and success back as `CUSTOM` events carrying the intervention row ID, which increments counters, recomputes `successRate`, writes a per-session impression row, and feeds the bandit's next pick.
 
+The three templates whose copy is only useful if it names the page - the `LOOP` banner, the `CIRCULAR_NAV` banner, and the `NOT_FOUND_BOUNCE` overlay - now interpolate `{route}`. `{route}` was documented as a template variable in `library.ts` from the start and filled in by `render()` the whole time; no template referenced it, so the copy told the user they had "been here a few times" about a page they had since forgotten, and that "that page is gone" without saying which page. The route is the session's known route, so it is resolved server-side from the same map the denylist uses and needs nothing from the SDK. When a batch arrives with no `NAVIGATION` event and no hydrated history the route is genuinely unknown, and fixing the gap with an empty substitution would produce "You've been back to  a few times" - worse than the vaguer original sentence. So the phrase collapses to the part that is still true ("back here a few times", "That page is gone") rather than leaving a hole or leaking a raw `{route}`, with a test over the whole template library so no future template can ship a placeholder the dispatcher does not fill.
+
 ## Other things worth a look
 
 - **Safe mode is time-boxed, not an indefinite flag.** The schema carries both `safeMode Boolean @default(true)` and a `safeModeUntil DateTime?`; the dispatcher documents it as the default for the first 7 days post-install.
@@ -214,12 +216,12 @@ The four migration directory names read as the project's phase history: `init`, 
 
 ## Testing
 
-187 tests across 13 Vitest files.
+192 tests across 13 Vitest files.
 
 | File | Tests | Covers |
 | --- | --- | --- |
 | `sdk.test.ts` | 45 | PII scrubbing, buffering, sampling, route tracking |
-| `dispatcher.test.ts` | 40 | variant selection, bandit behavior, copy substitution |
+| `dispatcher.test.ts` | 45 | variant selection, bandit behavior, copy substitution |
 | `struggle.test.ts` | 33 | detection rules |
 | `react-parser.test.ts` | 12 | Babel JSX extraction |
 | `crawler.test.ts` | 11 | HTML crawl |

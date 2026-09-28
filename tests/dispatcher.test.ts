@@ -269,6 +269,105 @@ describe('dispatch payload - confidence + diagnostic', () => {
     expect(out.length).toBeGreaterThan(0)
   })
 
+  it('substitutes {route} into copy a user has to act on', () => {
+    // These three templates are meaningless without the route: a LOOP banner
+    // that says "here" about a page the user has forgotten, a CIRCULAR_NAV
+    // banner about "pages" with none named, and a NOT_FOUND_BOUNCE overlay
+    // pointing at "that page". Before this, {route} was the one documented
+    // template variable (library.ts header, {label} + {route}) that no
+    // template used, so the dispatcher rendered it into nothing.
+    const ctx = { safeMode: false, routeBySession: new Map([['sess_1', '/settings/billing']]) }
+
+    const loop = dispatchInterventions([det('LOOP', { elementId: null })], ctx)
+    expect(loop[0]?.copy).toContain('/settings/billing')
+    expect(loop[0]?.copy).not.toContain('{route}')
+
+    const circular = dispatchInterventions([det('CIRCULAR_NAV', { elementId: null })], ctx)
+    expect(circular[0]?.copy).toContain('/settings/billing')
+    expect(circular[0]?.copy).not.toContain('{route}')
+
+    const gone = dispatchInterventions([det('NOT_FOUND_BOUNCE', { elementId: null })], ctx)
+    expect(gone[0]?.copy).toContain('/settings/billing')
+    expect(gone[0]?.copy).not.toContain('{route}')
+  })
+
+  it('renders no unresolved placeholder when the route is unknown', () => {
+    // A batch can arrive with no NAVIGATION event and no hydrated history, so
+    // the session map is empty. An empty substitution reads as a broken
+    // sentence ("You've been back to  a few times") and a literal `{route}`
+    // reads as a bug the customer sees, so the phrase collapses to the part
+    // that is still true.
+    const out = dispatchInterventions([det('LOOP', { elementId: null })], { safeMode: false })
+    const copy = out[0]?.copy ?? ''
+    expect(copy).not.toContain('{route}')
+    expect(copy).not.toMatch(/back to\s+a few times/)
+    expect(copy).toContain('back here a few times')
+
+    const gone = dispatchInterventions([det('NOT_FOUND_BOUNCE', { elementId: null })], {
+      safeMode: false,
+    })
+    expect(gone[0]?.copy).not.toContain('{route}')
+    expect(gone[0]?.copy).not.toMatch(/^\s+is gone/)
+    expect(gone[0]?.copy).toContain('That page is gone')
+  })
+
+  it('treats a blank route as unknown rather than interpolating whitespace', () => {
+    const out = dispatchInterventions([det('LOOP', { elementId: null })], {
+      safeMode: false,
+      routeBySession: new Map([['sess_1', '']]),
+    })
+    expect(out[0]?.copy).toContain('back here a few times')
+  })
+
+  it('reads as a sentence with no route, for every template that names one', () => {
+    // The phrase-level fallbacks are only correct in the phrase they replace,
+    // so pin the finished string and assert the joins are clean. Reading the
+    // rendered copy is the only way this class of mistake shows up -
+    // `CIRCULAR_NAV` once rendered "Bouncing between pages between pages" and a
+    // `{route}`-only assertion was perfectly happy with it.
+    const cases: Array<[StruggleDetection['type'], string]> = [
+      ['LOOP', 'You&rsquo;ve been back here a few times - looking for something specific?'],
+      ['CIRCULAR_NAV', 'Bouncing between two pages - the action you might want is here.'],
+      ['NOT_FOUND_BOUNCE', 'That page is gone. Try the search bar - top of the page.'],
+    ]
+    for (const [type, expected] of cases) {
+      const copy =
+        dispatchInterventions([det(type, { elementId: null })], { safeMode: false })[0]?.copy ?? ''
+      expect(copy, type).toBe(expected)
+      // No doubled word where the route stood, no orphaned preposition, no gap.
+      expect(copy, type).not.toMatch(/between pages between|around\s*[-.]|^\s|\s\s/)
+    }
+  })
+
+  it('leaves no unfilled placeholder in any dispatched template', () => {
+    // Guard for the whole library rather than the three fixed templates: any
+    // future template that references a variable the dispatcher does not
+    // supply would ship `{something}` to a customer's page.
+    for (const type of ALL_STRUGGLE_TYPES) {
+      const out = dispatchInterventions(
+        [
+          {
+            sessionId: 'sess_1',
+            elementId: E1,
+            type,
+            severity: 0.5,
+            ts: '2026-05-01T12:00:00.000Z',
+          },
+        ],
+        {
+          safeMode: false,
+          routeBySession: new Map([['sess_1', '/checkout']]),
+          elementLabels: new Map([[E1 as string, 'Place order']]),
+          elementValidation: new Map([[E1 as string, { required: true }]]),
+        },
+      )
+      for (const d of out) {
+        expect(d.copy, `${type} copy`).not.toMatch(/\{[a-zA-Z]+\}/)
+        expect(d.title ?? '', `${type} title`).not.toMatch(/\{[a-zA-Z]+\}/)
+      }
+    }
+  })
+
   it('REQUIRED_MISSED template uses element validation rules in copy', () => {
     const targetId = 'sh_ffffffffffffffffffffffffffffffff' as ElementId
     const out = dispatchInterventions(

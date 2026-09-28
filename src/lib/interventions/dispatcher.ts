@@ -309,6 +309,15 @@ function buildOptions(
   return Object.keys(out).length > 0 ? out : undefined
 }
 
+/**
+ * Fill the copy template's variables.
+ *
+ * `{route}` is not substituted with an empty string. A batch can arrive with
+ * no NAVIGATION event and no hydrated history, so the session's route is
+ * unknown - and "You&rsquo;ve been back to  a few times" is a broken sentence, while
+ * a literal `{route}` is a bug the customer sees. Both are worse than copy
+ * that says less, so the phrase collapses to the part that is still true.
+ */
 function render(
   template: string,
   vars: {
@@ -321,9 +330,19 @@ function render(
     journeyStage?: string | null
   },
 ): string {
-  return template
+  const route = vars.route && vars.route.trim() ? vars.route : null
+  let out = template
+  if (route === null) {
+    // "been back to {route} a few times" -> "been back here a few times"
+    out = out.replace(/back to \{route\}/g, 'back here')
+    // "{route} is gone" -> "That page is gone"
+    out = out.replace(/\{route\} is gone/g, 'That page is gone')
+    // "Bouncing between pages around {route}" -> "Bouncing between two pages"
+    out = out.replace(/ between pages around \{route\}/g, ' between two pages')
+  }
+  return out
     .replace(/\{label\}/g, vars.label ?? 'this')
-    .replace(/\{route\}/g, vars.route ?? '')
+    .replace(/\{route\}/g, route ?? '')
     .replace(/\{intent\}/g, vars.intent ?? vars.label ?? 'continue')
     .replace(/\{pageTitle\}/g, vars.pageTitle ?? '')
     .replace(/\{validation\}/g, vars.validation ?? '')
