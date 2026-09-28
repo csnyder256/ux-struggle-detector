@@ -181,17 +181,17 @@ describe('dwell p95 is weighted by quiet stretch, not by heartbeat row', () => {
     const baseline = await computed()
 
     // Samples are [10 000 (st_c), 15 000 (st_a), 25 000 (st_b)].
-    // sorted index floor(0.95*3)=2 -> 25 000. If heartbeats were counted, the
-    // >30 rows would drag the p95 up toward 25s only by luck; the sampleSize
-    // and the exact p95 pin the grouping.
+    // sorted index floor(0.95*3)=2 -> 25 000. If the heartbeat rows were each
+    // counted, the >30 samples would land on a heartbeat value; the exact p95
+    // is the witness. `sampleSize` is not - it counts sessions.
     expect(baseline.p95DwellMs).toBe(25_000)
   })
 
   it('root probe: identical stretch ids in different sessions remain independent', async () => {
     // THE MATERIAL DEFECT. `meta.stretch` is minted by the SDK in the browser
-    // from a client-local clock and a per-page counter, so the SAME string is
-    // guaranteed to appear in other sessions - other tabs, other devices, other
-    // users. Keying the grouping on the bare string fuses all of them into one
+    // from a client-local clock and a per-page counter, so the SAME string can
+    // appear in other sessions - other tabs, other devices, other users.
+    // Keying the grouping on the bare string fuses all of them into one
     // sample: 99 independent 10s stretches across 99 sessions plus one 120s
     // stretch in a 100th session collapse to a single 120s sample, so p95
     // reports 120s instead of 10s and the element reads as permanently calm -
@@ -211,9 +211,48 @@ describe('dwell p95 is weighted by quiet stretch, not by heartbeat row', () => {
 
     // 100 independent stretches in 100 sessions: 99 of 10s and one of 120s.
     // Sorted index floor(0.95*100)=95 -> the 96th of [10s x99, 120s] -> 10s.
+    // Fusing by bare string would give 120s, and the sample count cannot show
+    // it - `sampleSize` counts SESSIONS (100 either way), never stretches.
     expect(baseline.p95DwellMs).toBe(10_000)
-    // The samples are the 100 stretches, not one fused stretch per string.
-    expect(baseline.sampleSize).toBeGreaterThanOrEqual(100)
+  })
+
+  it('the longest report of one fused identity cannot swallow other pairs (delimiter join fails)', async () => {
+    // The key must stay unambiguous when a session id or a stretch id contains
+    // the separator a naive join would pick. Session ids and stretch ids are
+    // opaque ingested strings, so a separator can legally appear INSIDE either
+    // field. Build 22 distinct pairs that all take the same naive key:
+    //
+    //   pair_k     = ( "s"*10 + "|"*k ,  "|"*(21-k) + "L"*23 )   for k = 0..21
+    //   naive key  = session + "|" + stretch = "s"*10 + "|"*22 + "L"*23   (all k)
+    //
+    // A `session|stretch` implementation stores all 22 pairs under ONE key and
+    // keeps the longest report, 120_000. JSON serialization keeps them apart:
+    // 21 samples of 10_000 plus one of 120_000, sorted index floor(0.95*22)=20
+    // -> 10_000. The p95 is the witness; `sampleSize` counts SESSIONS, so it
+    // cannot see the number of dwell samples at all.
+    const S = 's'.repeat(10)
+    const L = 'L'.repeat(23)
+    const pairs: Array<[string, string]> = []
+    for (let k = 0; k < 22; k++) {
+      pairs.push([S + '|'.repeat(k), '|'.repeat(21 - k) + L])
+    }
+    const naiveKey = S + '|'.repeat(22) + L
+    // Guard the construction itself: if a test edit breaks it, these fail
+    // loudly instead of the case silently becoming a weaker test.
+    expect(pairs.every(([session, stretch]) => session + '|' + stretch === naiveKey)).toBe(true)
+    expect(new Set(pairs.map(([s, t]) => JSON.stringify({ session: s, stretch: t }))).size).toBe(22)
+
+    const shortPairs = pairs.slice(0, 21)
+    const longPair = pairs[21]!
+    for (const [session, stretch] of shortPairs) {
+      storedEvents.push(dwellRow(session, NOW.getTime() - 300_000, 10_000, stretch))
+    }
+    storedEvents.push(dwellRow(longPair[0], NOW.getTime() - 250_000, 120_000, longPair[1]))
+    storedEvents.push(...filler())
+
+    const baseline = await computed()
+
+    expect(baseline.p95DwellMs).toBe(10_000)
   })
 
   it('one session’s heartbeat rows still collapse to a single sample', async () => {
@@ -237,33 +276,5 @@ describe('dwell p95 is weighted by quiet stretch, not by heartbeat row', () => {
 
     // Samples [15 000, 25 000] -> floor(0.95*2)=1 -> 25 000.
     expect(baseline.p95DwellMs).toBe(25_000)
-  })
-
-  it('keys the pair unambiguously when a session id mimics a stretch string', async () => {
-    // A session id and a stretch id are both opaque ingested strings. With a
-    // naive `session|stretch` join, ('a', 'b|c') and ('a|b', 'c') are the same
-    // key, so the 120s sample could overwrite an unrelated session's 10s sample.
-    // The tuple key keeps them apart: two samples, [10 000, 120 000] ->
-    // floor(0.95*2)=1 -> 120 000; a collision would also give 120 000, so pin
-    // the count as well.
-    storedEvents.push(dwellRow('a', NOW.getTime() - 300_000, 10_000, 'b|c'))
-    storedEvents.push(dwellRow('a|b', NOW.getTime() - 250_000, 120_000, 'c'))
-    storedEvents.push(...filler())
-
-    const baseline = await computed()
-
-    expect(baseline.p95DwellMs).toBe(120_000)
-    const extraction = written as { baseline?: { sampleSize: number } } | undefined
-    expect(extraction?.baseline?.sampleSize).toBe(5) // 2 dwell sessions + sess_0..2 filler
-  })
-
-  it('keys the pair unambiguously when a stretch string mimics a session id', async () => {
-    storedEvents.push(dwellRow('a|b', NOW.getTime() - 300_000, 10_000, 'c'))
-    storedEvents.push(dwellRow('a', NOW.getTime() - 250_000, 120_000, 'b|c'))
-    storedEvents.push(...filler())
-
-    const baseline = await computed()
-
-    expect(baseline.p95DwellMs).toBe(120_000)
   })
 })

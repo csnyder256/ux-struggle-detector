@@ -58,30 +58,62 @@ describe('real Chromium evidence', () => {
     // ── 0. What source is actually under test ─────────────────────────────
     // A HEAD string alone cannot describe a capture: a run taken with edits in
     // the working tree would be labelled with a commit whose content it did not
-    // execute. Record the HEAD *at capture* plus the dirty state of every file
-    // that feeds the capture (the SDK bundle is generated from src/sdk/index.ts,
-    // so that source's cleanliness is part of the bundle's provenance), and
-    // derive the source label from BOTH. A dirty capture is described as dirty;
-    // it is never presented as the committed source of its HEAD.
-    const dirtyPaths = (
-      execSync('git status --porcelain -- src/sdk/index.ts public/sdk.js public/sdk.min.js', {
-        cwd: ROOT,
-      }).toString() || ''
+    // execute. Record the HEAD *at capture*, the dirty state of the WHOLE
+    // working tree (path names only - never values), and separately the scoped
+    // state of the files that feed the capture (the SDK bundle is generated
+    // from src/sdk/index.ts, so that source's cleanliness is part of the
+    // bundle's provenance). The two are labelled independently: a PR under
+    // review has test/doc edits in the tree while its bundle is untouched, and
+    // "the bundle is clean" must not be reported as "the tree is clean".
+    //
+    // `bundleMatchesHead` is NOT inferred from status. It compares the bytes
+    // committed at HEAD for each bundle path (`git show HEAD:<path>`) with the
+    // bytes on disk now - the bytes the browser actually executed. Status is a
+    // weaker signal (a path can be absent from status and still differ from
+    // HEAD via checkout/skip-worktree oddities), so the hash is the evidence.
+    const dirtyPathsAll = (
+      execSync('git status --porcelain', { cwd: ROOT }).toString() || ''
     )
       .split('\n')
       .map((line) => line.slice(3).trim())
       .filter((p) => p.length > 0)
 
+    const bundlePaths = ['src/sdk/index.ts', 'public/sdk.js', 'public/sdk.min.js']
+    const bundleDirtyPaths = dirtyPathsAll.filter((p) => bundlePaths.includes(p))
+
+    const committedHash = (path: string): string =>
+      createHash('sha256').update(execSync(`git show HEAD:${path}`, { cwd: ROOT })).digest('hex')
+    const committedSdkHash = committedHash('public/sdk.js')
+    const committedMinHash = committedHash('public/sdk.min.js')
+
     const sourceProvenance = {
       headAtCapture: head,
-      bundleSourceDirtyAtCapture: dirtyPaths.length > 0,
-      dirtyPathsAtCapture: dirtyPaths,
-      bundleMatchesHead: dirtyPaths.length === 0,
-      sourceLabel:
-        dirtyPaths.length > 0
-          ? `HEAD ${head} at capture + uncommitted working-tree edits to ${dirtyPaths.join(', ')}`
-          : `HEAD ${head} at capture, clean working tree (bundles commit-identical)`,
+      workingTreeDirtyAtCapture: dirtyPathsAll.length > 0,
+      dirtyPathsAtCapture: dirtyPathsAll,
+      // Scoped to the capture inputs, and each bundle's byte identity pinned
+      // against the committed bytes rather than against `git status`.
+      bundleSourceDirtyAtCapture: bundleDirtyPaths.length > 0,
+      bundleDirtyPathsAtCapture: bundleDirtyPaths,
+      sdkBundleMatchesHead: committedSdkHash === sha256(resolve(ROOT, 'public/sdk.js')),
+      sdkMinBundleMatchesHead: committedMinHash === sha256(resolve(ROOT, 'public/sdk.min.js')),
+      bundleMatchesHead: false as boolean,
+      sourceLabel: '',
     }
+    sourceProvenance.bundleMatchesHead =
+      sourceProvenance.sdkBundleMatchesHead && sourceProvenance.sdkMinBundleMatchesHead
+    sourceProvenance.sourceLabel = [
+      sourceProvenance.bundleMatchesHead
+        ? `SDK bundles are byte-identical to HEAD ${head}`
+        : `SDK bundles DIFFER from HEAD ${head}`,
+      bundleDirtyPaths.length > 0
+        ? `bundle inputs dirty at capture (${bundleDirtyPaths.join(', ')})`
+        : 'bundle inputs clean at capture',
+      dirtyPathsAll.length > 0
+        ? `working tree DIRTY at capture (${dirtyPathsAll.length} path(s) uncommitted, e.g. ${dirtyPathsAll
+            .slice(0, 4)
+            .join(', ')}) - the capture is HEAD's bundle bytes, not HEAD's tree`
+        : 'working tree clean at capture',
+    ].join('; ')
     evidence.push({ title: '0. Source provenance at capture', value: sourceProvenance })
 
     const page = await browser.newPage()
@@ -269,14 +301,19 @@ describe('real Chromium evidence', () => {
     expect(bad.value).toBe('')
     expect(sdkCapture.withValidity.length).toBeGreaterThan(0)
 
-    // The provenance label must not claim more than was observed: a clean run
-    // says so, a dirty run says so. Neither form may read as "committed source
-    // of HEAD ran" when the bundle was edited in the working tree.
+    // The provenance label must not claim more than was observed: the bundle's
+    // byte identity and the working tree's cleanliness are reported separately,
+    // because a PR-under-review capture has uncommitted test/doc edits while
+    // executing committed bundle bytes. Neither form may read as "the committed
+    // tree of HEAD ran" when the tree was dirty.
     expect(sourceProvenance.headAtCapture).toBe(head)
-    if (sourceProvenance.bundleSourceDirtyAtCapture) {
-      expect(sourceProvenance.sourceLabel).toContain('uncommitted working-tree edits')
+    expect(sourceProvenance.sdkBundleMatchesHead).toBe(sha256(resolve(ROOT, 'public/sdk.js')) === committedSdkHash)
+    expect(sourceProvenance.sdkMinBundleMatchesHead).toBe(sha256(resolve(ROOT, 'public/sdk.min.js')) === committedMinHash)
+    if (sourceProvenance.workingTreeDirtyAtCapture) {
+      expect(sourceProvenance.sourceLabel).toContain('working tree DIRTY at capture')
+      expect(sourceProvenance.dirtyPathsAtCapture.length).toBeGreaterThan(0)
     } else {
-      expect(sourceProvenance.sourceLabel).toContain('clean working tree')
+      expect(sourceProvenance.sourceLabel).toContain('working tree clean at capture')
     }
     // The hashes in the transcript are the bytes the browser actually executed,
     // whatever the provenance - so re-hashing them now must reproduce the table.
@@ -294,9 +331,19 @@ describe('real Chromium evidence', () => {
     lines.push(`| Source (at capture) | \`${sourceProvenance.sourceLabel}\` |`)
     lines.push(`| HEAD at capture | \`${head}\` |`)
     lines.push(
-      dirtyPaths.length > 0
-        ? `| Working tree at capture | **dirty** - the bundle was built with uncommitted edits to ${dirtyPaths.map((p) => `\`${p}\``).join(', ')}, so this capture is NOT the committed source of the HEAD above |`
-        : `| Working tree at capture | clean - the capture executed the committed source of the HEAD above |`,
+      sourceProvenance.bundleMatchesHead
+        ? `| SDK bundle bytes vs HEAD | match - \`public/sdk.js\` and \`public/sdk.min.js\` are byte-identical to the blobs committed at \`${head}\` (compared via \`git show HEAD:<path>\` sha256, not via \`git status\`) |`
+        : `| SDK bundle bytes vs HEAD | **DIFFER** - the executed bundle is not the blob committed at \`${head}\` |`,
+    )
+    lines.push(
+      bundleDirtyPaths.length > 0
+        ? `| Bundle inputs at capture | **dirty** - uncommitted edits to ${bundleDirtyPaths.map((p) => `\`${p}\``).join(', ')} |`
+        : `| Bundle inputs at capture | clean - \`src/sdk/index.ts\` and both bundles are unmodified in the working tree |`,
+    )
+    lines.push(
+      dirtyPathsAll.length > 0
+        ? `| Working tree at capture | **DIRTY** - ${dirtyPathsAll.length} uncommitted path(s): ${dirtyPathsAll.map((p) => `\`${p}\``).join(', ')}. This capture executed the committed SDK bundle bytes above, NOT the working tree of \`${head}\` |`
+        : `| Working tree at capture | clean - no uncommitted paths at capture |`,
     )
     lines.push(`| Chromium | \`${chromiumVersion}\` (\`${CHROMIUM}\`) |`)
     lines.push(`| Node | \`${process.version}\` |`)

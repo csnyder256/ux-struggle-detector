@@ -132,17 +132,23 @@ export async function computeBaselinesForOrg(orgId: string): Promise<BaselineCom
       //
       // A stretch is identified by the PAIR (sessionId, meta.stretch), not by
       // the stretch string alone. The SDK mints its stretch id client-side from
-      // a browser-local clock and a per-page counter, so the identical string
-      // `st_abc_1` is guaranteed to collide across tabs, devices and users:
-      // grouping on the bare string would fuse one quiet stretch from each of
-      // those sessions into a single sample, letting a 120s stare in some other
-      // session swallow 99 independent 10s stretches (and, worse, discarding
-      // the other sessions' samples outright). The session is the only field
-      // that separates two client-local stretch identities, so it is part of
-      // the key. The key is a null-prototype record whose fields are length-
-      // prefixed, because a joined string is ambiguous whenever one field can
-      // contain the separator ("a\u0000b" + "c" vs "a" + "b\u0000c"); length
-      // prefixes make two distinct (session, stretch) pairs two distinct keys.
+      // a browser-local clock and a per-page counter, so nothing stops the
+      // identical string `st_abc_1` from appearing in more than one session -
+      // other tabs, other devices, other users. Grouping on the bare string
+      // would then fuse one quiet stretch from each of those sessions into a
+      // single sample, letting a 120s stare in some session swallow 99
+      // independent 10s stretches (and, worse, discarding the other sessions'
+      // samples outright). The session is the field that separates two
+      // client-local stretch identities, so it is part of the key.
+      //
+      // Both fields are opaque ingested strings, so the key must stay
+      // unambiguous when either contains whatever separator a plain join would
+      // use: `dwellStretchKey` serializes the pair with `JSON.stringify`, which
+      // quotes and escapes both fields and orders them by declared property
+      // ("session" then "stretch"). A joined-and-split implementation is
+      // ambiguous the moment a field can contain the separator; the JSON form
+      // is unambiguous for the same reason. A test that pins the difference
+      // lives in tests/baselines-dwell-grouping.test.ts.
       //
       // Legacy rows (written before the identity existed) have no meta.stretch.
       // Each has no way to be tied to another, so each is its own stretch of the
@@ -212,12 +218,14 @@ export async function computeBaselinesForOrg(orgId: string): Promise<BaselineCom
  * Collision-safe identity for one quiet stretch: the (session, stretch) pair.
  *
  * The SDK's `meta.stretch` is minted client-side and is only unique within one
- * browser session, so the session is half the identity. Both fields are encoded
- * with an explicit byte length so no two distinct pairs can produce the same
- * key - a plain join is ambiguous the moment a field can contain the separator
- * or is a callable Map key (`sessionId.toString`), and both are reachable from
- * ingested data. The record has a null prototype so no field value can ever
- * collide with an inherited member name.
+ * browser session, so the session is half the identity. Both fields are opaque
+ * strings that may contain any character, including whatever separator a plain
+ * join would pick, so the pair is serialized as an ordered JSON object -
+ * `JSON.stringify({ session: sessionId, stretch })`. `JSON.stringify` quotes
+ * both values and escapes their contents, and emits the properties in the
+ * declared order, so two distinct (session, stretch) pairs always serialize to
+ * two distinct strings. A joined-and-split implementation would instead have
+ * ('a', 'b|c') and ('a|b', 'c') collide on the key "a|b|c".
  */
 function dwellStretchKey(sessionId: string, stretch: string): string {
   return JSON.stringify({ session: sessionId, stretch })
