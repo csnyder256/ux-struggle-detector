@@ -56,6 +56,16 @@ async function idleUntilReports(sdk: SdkRun, targets: number, maxMs = 200_000): 
   }
 }
 
+
+/** Wait for the evidence the detector needs, not an assumed heartbeat cadence. */
+async function idleUntilDwell(sdk: SdkRun, elementId: ElementId, ms: number): Promise<void> {
+  for (let elapsed = 0; elapsed < 200_000; elapsed += 1_000) {
+    if (dwellEvents(sdk.events).some(e => e.elementId === elementId && Number(e.meta?.ms) >= ms)) return
+    await tick(1_000)
+  }
+  throw new Error(`SDK never reported ${ms}ms of dwell on ${elementId}`)
+}
+
 /** The id the SDK itself would resolve for an element, so the test never guesses. */
 async function elementIdFor(el: Element): Promise<ElementId> {
   const { resolveElementId } = await import('@/sdk/element-id')
@@ -140,7 +150,7 @@ describe('DWELL attribution', () => {
 
     typeInto(tax, '12')
     await tick(1_000)
-    await idleUntilReports(run, 111)
+    await idleUntilDwell(run, taxId, 45_000)
 
     const dwell = dwellEvents(run.events)
     expect(dwell[0]?.elementId).toBe(taxId)
@@ -171,7 +181,7 @@ describe('DWELL attribution', () => {
     await tick(1_000)
     moveMouse(filler)
     await tick(500)
-    await idleUntilReports(run, 111)
+    await idleUntilDwell(run, taxId, 45_000)
 
     // A baseline the *filler* block earned from being hovered must not be the
     // one that decides whether the tax field is stuck. Both baselines are

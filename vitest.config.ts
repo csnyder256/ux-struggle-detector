@@ -10,10 +10,10 @@ const alias = {
 const server = { deps: { inline: ['next-auth'] } }
 
 /**
- * The three SDK-DOM suites drive the SDK's real 1s dwell timer through Vitest's
+ * The four SDK-DOM suites drive the SDK's real 1s dwell timer through Vitest's
  * fake clock. A fake-timer advance delivers a variable number of interval
  * callbacks depending on how busy the machine is, so when those files shared
- * CPU with the other fifteen, an occasional run delivered fewer ticks and a
+ * CPU with the other suites, an occasional run delivered fewer ticks and a
  * timing-sensitive assertion failed on a loaded box rather than on the code.
  * They get their own serial project, so the clock stays deterministic; every
  * other suite keeps running in parallel.
@@ -30,6 +30,7 @@ export default defineConfig({
           server,
           include: ['tests/**/*.test.ts'],
           exclude: [
+            'tests/sdk-dwell-attribution.test.ts',
             'tests/sdk-dwell-backend.test.ts',
             'tests/sdk-dwell-stretch-flow.test.ts',
             'tests/sdk-validity-flow.test.ts',
@@ -45,6 +46,7 @@ export default defineConfig({
           setupFiles: ['./tests/sdk-dom-env.ts'],
           server,
           include: [
+            'tests/sdk-dwell-attribution.test.ts',
             'tests/sdk-dwell-backend.test.ts',
             'tests/sdk-dwell-stretch-flow.test.ts',
             'tests/sdk-validity-flow.test.ts',
