@@ -214,6 +214,19 @@ export async function POST(req: NextRequest) {
 
   const detections = detectStruggles(allEvents, { baselines })
 
+  // The page's own validation messages, taken off the events in this batch.
+  // The browser owns `validationMessage` and drops it on reload, so it can
+  // only reach the dispatcher through the failing event itself. Last write
+  // wins: the most recent failure on that field is the one worth showing.
+  const validationMessageByElement = new Map<string, string>()
+  for (const e of allEvents) {
+    if (!e.elementId) continue
+    const message = e.element?.validationMessage
+    if (typeof message === 'string' && message.trim()) {
+      validationMessageByElement.set(e.elementId, message.trim())
+    }
+  }
+
   // ── Persist struggle events (best effort).
   for (const d of detections) {
     if (!STRUGGLE_TYPE_SET.has(d.type)) continue
@@ -386,6 +399,17 @@ export async function POST(req: NextRequest) {
       inputType?: string
       min?: number | string
       max?: number | string
+      step?: number | string
+      customValidity?: string
+      customError?: boolean
+      tooShort?: boolean
+      tooLong?: boolean
+      typeMismatch?: boolean
+      patternMismatch?: boolean
+      badInput?: boolean
+      rangeUnderflow?: boolean
+      rangeOverflow?: boolean
+      stepMismatch?: boolean
     }
   >()
   for (const el of elementsWithSemantics) {
@@ -534,6 +558,7 @@ export async function POST(req: NextRequest) {
     elementSemantics: semanticMap,
     elementRoles,
     elementValidation,
+    validationMessageByElement,
     semanticNameIndex,
     safeMode,
     routeBySession,

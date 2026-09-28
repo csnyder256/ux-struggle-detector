@@ -457,6 +457,57 @@ describe('dispatchInterventionsWithRows', () => {
   })
 })
 
+describe('dispatchInterventions - validation copy', () => {
+  function copyFor(validation: Record<string, unknown>): string {
+    const out = dispatchInterventions([det('FORMAT_ERROR')], {
+      safeMode: false,
+      elementLabels: new Map([[E1 as string, 'Tax ID']]),
+      elementValidation: new Map([[E1 as string, validation]]),
+    })
+    return out[0]?.copy ?? ''
+  }
+
+  it('renders the reconstructed constraint instead of a bare label', () => {
+    // The FORMAT_ERROR template is `{label} {validation}.` - with no
+    // recognised rules the sentence renders as "Tax ID ."
+    expect(copyFor({ inputType: 'email' })).toBe('Tax ID needs valid email.')
+  })
+
+  it('prefers the message the customer wrote for the field', () => {
+    const copy = copyFor({
+      inputType: 'email',
+      customValidity: 'That VAT ID is not the right length for this country.',
+    })
+    expect(copy).toContain('That VAT ID is not the right length for this country.')
+    expect(copy).not.toContain('valid email')
+  })
+
+  it('names a native constraint failure the rules alone could not describe', () => {
+    expect(copyFor({ customError: true })).toBe('Tax ID needs a valid value.')
+    expect(copyFor({ rangeUnderflow: true, min: 18 })).toBe('Tax ID needs at least 18.')
+    expect(copyFor({ rangeOverflow: true, max: 120 })).toBe('Tax ID needs at most 120.')
+    // A step with no `min` is anchored at 0 by the browser, so 0, 5, 10 are
+    // the values it actually accepts.
+    expect(copyFor({ stepMismatch: true, step: 5 })).toBe('Tax ID needs one of 0, 5, 10, 15, ….')
+    expect(copyFor({ badInput: true })).toBe('Tax ID needs a number.')
+  })
+
+  it('does not repeat one description twice', () => {
+    // `pattern` and `patternMismatch` both describe "a valid format".
+    expect(copyFor({ pattern: '^\\d+$', patternMismatch: true })).toBe(
+      'Tax ID needs a valid format.',
+    )
+  })
+
+  it('keeps the bare-label render only when nothing is known about the field', () => {
+    const out = dispatchInterventions([det('FORMAT_ERROR')], {
+      safeMode: false,
+      elementLabels: new Map([[E1 as string, 'Tax ID']]),
+    })
+    expect(out[0]?.copy).toBe('Tax ID .')
+  })
+})
+
 describe('bandit variant selection', () => {
   const E = 'sh_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as ElementId
 

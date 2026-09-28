@@ -198,17 +198,31 @@ function initInner(opts: InitOptions): void {
       if ('value' in el && typeof el.value === 'string') ctx.valueLength = el.value.length
       if (el.disabled) ctx.disabled = true
       if (typeof el.checkValidity === 'function' && !el.checkValidity()) {
-        const flags: string[] = []
         const v = el.validity
-        if (v?.valueMissing) flags.push('valueMissing')
-        if (v?.typeMismatch) flags.push('typeMismatch')
-        if (v?.patternMismatch) flags.push('patternMismatch')
-        if (v?.tooShort) flags.push('tooShort')
-        if (v?.tooLong) flags.push('tooLong')
-        if (v?.rangeUnderflow) flags.push('rangeUnderflow')
-        if (v?.rangeOverflow) flags.push('rangeOverflow')
-        if (v?.stepMismatch) flags.push('stepMismatch')
+        const byFlag = new Map<string, boolean>([
+          ['valueMissing', Boolean(v?.valueMissing)],
+          ['typeMismatch', Boolean(v?.typeMismatch)],
+          ['patternMismatch', Boolean(v?.patternMismatch)],
+          ['tooShort', Boolean(v?.tooShort)],
+          ['tooLong', Boolean(v?.tooLong)],
+          ['rangeUnderflow', Boolean(v?.rangeUnderflow)],
+          ['rangeOverflow', Boolean(v?.rangeOverflow)],
+          ['stepMismatch', Boolean(v?.stepMismatch)],
+          // Only a real browser has `badInput` and lets a page set a custom
+          // message; both are worth sending because a page's own message is
+          // better copy than anything reconstructed from attributes.
+          ['badInput', Boolean(v?.badInput)],
+          ['customError', Boolean(v?.customError)],
+        ])
+        const flags = Array.from(byFlag).filter(([, on]) => on).map(([name]) => name)
         if (flags.length > 0) ctx.validity = flags.join(',')
+        // The message the page itself gave the field. This is the only place it
+        // can be captured: after a reload the string is gone, so if we do not
+        // send it with the validation failure, no server-side copy can recover it.
+        if (v?.customError) {
+          const message = el.validationMessage?.trim()
+          if (message) ctx.validationMessage = message.slice(0, 200)
+        }
       }
     }
     if (el instanceof HTMLButtonElement && el.disabled) ctx.disabled = true
@@ -268,7 +282,29 @@ function initInner(opts: InitOptions): void {
     return rate >= 1 ? true : rate <= 0 ? false : Math.random() < rate
   }
 
-  async function emit(
+  /**
+   * Tail of the emit chain. `resolveElementId` is async (it hashes through
+   * `crypto.subtle`), so two emits in flight can finish in the opposite order
+   * and land in the buffer reversed - and the buffer is the ordered record the
+   * server detector reads. Chaining the whole emit, not just the buffer push,
+   * is what makes the completion order the call order; serializing only the
+   * push would still let the faster hash overtake the slower one.
+   */
+  let emitChain: Promise<unknown> = Promise.resolve()
+
+  function emit(
+    eventType: EventType,
+    el: Element | null,
+    meta?: RuntimeEvent['meta'],
+  ): Promise<RuntimeEvent | null> {
+    const run = emitChain.then(() => emitNow(eventType, el, meta))
+    // Keep the chain alive even if one emit fails, so a single bad event does
+    // not wedge every later one.
+    emitChain = run.catch(() => undefined)
+    return run
+  }
+
+  async function emitNow(
     eventType: EventType,
     el: Element | null,
     meta?: RuntimeEvent['meta'],
@@ -452,22 +488,73 @@ function initInner(opts: InitOptions): void {
     { capture: false, passive: true },
   )
 
-  // ── Dwell (every 30s, last interactive element) ──────────────────────────
+  // ── Dwell (checked every second, reported at 10/30s … and re-armed) ──────
+  // The threshold is 15-30s and a per-element baseline can raise it further,
+  // so the check is far cheaper than the threshold; waking every 1s turns
+  // "stared at a page and did nothing" from up to 30s late into ~1s late. A
+  // 30s tick also handed out a free verification reset: any progress at all
+  // within 30s looked idle. The interval itself is not the signal, so it must
+  // never be what the threshold is compared against.
   let lastInteractEl: Element | null = null
   let lastInteractTs = Date.now()
+  /** Quiet time worth reporting as a dwell. Below the 15-30s rules on purpose
+   *  so an adapted baseline still has a reported number to act on. */
+  const DWELL_REPORT_MS = 10_000
+  /**
+   * Whether a DWELL has already been emitted for the quiet stretch currently
+   * in progress. The timer wakes every second, so without this a single idle
+   * period would re-fire on every later tick and feed the per-element dwell
+   * baseline duplicates of itself. It cannot be "did the timer reset
+   * lastInteractTs": the tick that carries the report has already read
+   * `lastInteractTs` by then, and a report that lands late in a stretch must
+   * describe the whole stretch, not just the time since the previous report.
+   */
+  let reportedThisStretch = false
+  /** The stretch length already reported in the current quiet period. */
+  let lastReportedMs = 0
+  /**
+   * Identity of the quiet stretch currently in progress. Every DWELL report
+   * for one stretch carries the same value, and a resumed interaction mints a
+   * new one. The server's per-element dwell baseline groups reports by this id
+   * and takes ONE sample per stretch, so a single 120s stare that was reported
+   * 111 times does not out-vote 111 separate 10s stares. Distinct ms values
+   * are not a substitute: the reports of one stretch are all distinct by
+   * construction, which is exactly what made counting rows look safe.
+   */
+  let stretchSeq = 0
+  let stretchId = `st_${Date.now().toString(36)}_0`
+  function markActivity(): void {
+    lastInteractTs = Date.now()
+    reportedThisStretch = false
+    // A new stretch gets a new id; the next report of THIS stretch is the
+    // first of its life, so `lastReportedMs` resets with it.
+    stretchSeq += 1
+    lastReportedMs = 0
+    stretchId = `st_${Date.now().toString(36)}_${stretchSeq}`
+  }
   document.addEventListener(
     'mousemove',
     () => {
-      lastInteractTs = Date.now()
+      markActivity()
     },
     { capture: false, passive: true },
   )
   window.setInterval(() => {
-    const dwellMs = Date.now() - lastInteractTs
-    if (dwellMs >= 30_000) {
-      void emit('DWELL', lastInteractEl, { ms: dwellMs })
+    const quietMs = Date.now() - lastInteractTs
+    // The stretch is measured from the last real interaction or from the start
+    // of this stretch, whichever is later - never from a report that merely
+    // reset the timer, or a two-minute stare would be reported as 10s.
+    const stretchMs = reportedThisStretch ? lastReportedMs + quietMs : quietMs
+    if (stretchMs >= DWELL_REPORT_MS) {
+      // `stretch` identifies the quiet stretch this report belongs to, so the
+      // server can count one sample per stretch instead of one per heartbeat.
+      void emit('DWELL', lastInteractEl, { ms: stretchMs, stretch: stretchId })
+      // Report the quiet stretch once, then carry on measuring it.
+      lastReportedMs = stretchMs
+      lastInteractTs = Date.now()
+      reportedThisStretch = true
     }
-  }, 30_000)
+  }, 1000)
   document.addEventListener(
     'mousemove',
     (e) => {

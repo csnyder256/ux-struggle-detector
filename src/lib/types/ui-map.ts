@@ -122,6 +122,33 @@ export interface ValidationRules {
   readonly?: boolean
   /** Whether the field is disabled. */
   disabled?: boolean
+  /**
+   * Message passed to `setCustomValidity()` for a constraint failure, when the
+   * source statically resolvable (a string literal - a dynamic expression is
+   * not). The dispatcher prefers it over the reconstructed description.
+   */
+  customValidity?: string
+  /**
+   * Native ValidityState flags the field raises on its own. These are the
+   * failures the browser reports as their own flag (`customError`,
+   * `tooShort`, `typeMismatch`…), so an intervention can name the real reason
+   * instead of a generic "a valid format".
+   *
+   * The flag-backed five (`valueMissing`, `tooShort`, `tooLong`,
+   * `typeMismatch`, `patternMismatch`) are deliberately NOT mirrored here:
+   * the SDK already sends the browser's validity flags for those, and
+   * duplicating the inference would fire REQUIRED_MISSED and FORMAT_ERROR for
+   * a single failure.
+   */
+  customError?: boolean
+  tooShort?: boolean
+  tooLong?: boolean
+  typeMismatch?: boolean
+  patternMismatch?: boolean
+  badInput?: boolean
+  rangeUnderflow?: boolean
+  rangeOverflow?: boolean
+  stepMismatch?: boolean
 }
 
 /**

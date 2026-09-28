@@ -6,7 +6,7 @@
 ![TypeScript](https://img.shields.io/badge/typescript-5.6%20strict-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![Next.js](https://img.shields.io/badge/next.js-15%20app%20router-000000?style=flat-square&logo=nextdotjs&logoColor=white)
 ![Prisma](https://img.shields.io/badge/prisma-5%20%2F%20postgres-2D3748?style=flat-square&logo=prisma&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-179%20across%2010%20files-brightgreen?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-220%20across%2018%20files-brightgreen?style=flat-square)
 ![Detection rules](https://img.shields.io/badge/struggle%20rules-40-orange?style=flat-square)
 ![SDK](https://img.shields.io/badge/browser%20SDK-26%20KB%20minified-informational?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
@@ -87,7 +87,7 @@ Every extracted element gets a deterministic ID (`sh_` plus 32 hex chars) from `
 
 There is also a one-line auto-init form: a `<script>` tag carrying `data-org-id` is picked up by `readAutoInitOptions()` (`src/sdk/index.ts:563`), so no second script block is needed.
 
-It captures 15 event types (click, input change, submit, navigation, hover, scroll, dwell, paste, copy, focus, blur, keydown, JS error, validation error, custom), buffers to survive offline, and supports uniform, per-type, and predicate-based sampling.
+It captures 15 event types (click, input change, submit, navigation, hover, scroll, dwell, paste, copy, focus, blur, keydown, JS error, validation error, custom), buffers to survive offline, and supports uniform, per-type, and predicate-based sampling. A dwell is checked once a second and reported when the user has been quiet for 10s, so a 15s or 30s idle threshold is detected about when it happens rather than up to half a minute late. Each report carries the quiet stretch it belongs to (`meta.stretch`) and grows as that stretch continues, so a long idle can still clear a baseline-raised threshold and a resumed interaction starts a fresh stretch. Because one stretch is therefore many rows, the per-element dwell baseline groups by `meta.stretch` and takes one sample per stretch - a single 120s stare must not out-vote 99 separate 10s stares just by having been reported 111 times.
 
 It does not care what the host app is built with. Listeners sit at the document level, so it needs no framework hooks. Navigation is followed through `pushState`, `replaceState` (only when the route changes) and the back/forward buttons. For hash-mode routers (`#/cart`, AngularJS `#!/cart`), the route comes from the fragment, so those screens are not all reported as `/`. Where the browser has the Navigation API, a forward move to a new fragment is kept apart from a real back-button press, so clicking through hash links never reads as back-button thrash. Calling `initSelfHealing()` during a server render is a no-op, so frameworks that render on the server can call it from shared code.
 
@@ -116,7 +116,7 @@ Honest wrinkle: **the SDK emits 15 event types; the Prisma `EventType` enum pers
 | Auth (2) | `LOGIN_FAILURE`, `LOCKED_OUT` |
 | Other (3) | `KEYBOARD_LOST_FOCUS`, `COPY_BOUNCE`, `HELP_HUNT` |
 
-Detection thresholds are not constants. A nightly cron computes p95 click-rate, dwell, and hover baselines per element, and the detector consumes them, so a noisy game button gets a higher rage-click threshold than a Delete button.
+Detection thresholds are not constants. A nightly cron computes p95 click-rate, dwell, and hover baselines per element, and the detector consumes them, so a noisy game button gets a higher rage-click threshold than a Delete button. A baseline can only move a threshold in the direction of caution, and always could: `Math.max` against the static rule means an element whose history suggests a *lower* bar keeps the static one, because under-firing on a quiet element is a missed hint while over-firing on it is an intervention the customer sees on a page where the user was never stuck.
 
 `src/lib/interventions/dispatcher.ts` (523 lines) picks what to show. It runs an epsilon-greedy multi-armed bandit (epsilon 0.1) over copy variants, weighted by empirical success rate with Laplace smoothing. `pickVariantDeterministic` takes over in two cases: below `banditMinSamples` (30) total impressions, and whenever the stats map is absent entirely. That guarantees both early exploration and reproducible unit tests. The RNG is injectable. The dispatcher honors a per-route denylist and per-intervention pause flags, and prefers LLM-precomputed copy from an `InterventionCache` over the 42 in-code templates in `library.ts`. The allowlist that makes this safe is enforced upstream, at cache-write time: the precompute worker only ever writes cache rows for the eight types in `VALID_RENDERER_TYPES` (`src/lib/interventions/precompute.ts:159`) - `OVERLAY`, `HIGHLIGHT`, `TOOLTIP`, `MODAL`, `BANNER`, `INLINE_HINT`, `CONFIRM`, `ANNOUNCE` - so invasive types can never be served from cache.
 
@@ -212,25 +212,34 @@ The four migration directory names read as the project's phase history: `init`, 
 
 `pnpm-workspace.yaml` exists at the root but contains only a build flag (`allowBuilds: esbuild: false`). There are no workspace packages. This is one Next.js application, deliberately, not a half-finished monorepo.
 
+Differs from `readValidation` in `react.ts` only in how the platform attributes behave. Both read the markup that genuinely exists: text, numeric range (`min`/`max`), `step`, `minLength`/`maxLength`, `pattern`, and `inputType`. Neither reads a validity flag, because none can: `setCustomValidity`, `customError`, `badInput` and the rest of the `ValidityState` set are runtime state a page produces by calling browser APIs on a live element, not attributes in a source file. They reach the server the only way they can - the SDK captures them off the real element and sends `element.validity` and `element.validationMessage` with the failing event. The dispatcher renders that into the `{validation}` slot of the copy templates, preferring the page's own message, so a field that fails only `rangeUnderflow` gets "needs at least 18" and a field the page gave a custom message shows that message instead of a generic one.
+
 ## Testing
 
-187 tests across 13 Vitest files.
+220 tests across 18 Vitest files.
 
 | File | Tests | Covers |
 | --- | --- | --- |
 | `sdk.test.ts` | 45 | PII scrubbing, buffering, sampling, route tracking |
-| `dispatcher.test.ts` | 40 | variant selection, bandit behavior, copy substitution |
-| `struggle.test.ts` | 33 | detection rules |
-| `react-parser.test.ts` | 12 | Babel JSX extraction |
+| `dispatcher.test.ts` | 45 | variant selection, bandit behavior, copy substitution |
+| `struggle.test.ts` | 37 | detection rules, sliding windows, adaptive thresholds |
+| `react-parser.test.ts` | 13 | Babel JSX extraction, validation rules |
 | `crawler.test.ts` | 11 | HTML crawl |
 | `ui-map.test.ts` | 11 | ElementId determinism |
-| `universal-parser.test.ts` | 10 | template scan across families |
+| `universal-parser.test.ts` | 11 | template scan across families |
 | `playwright-crawler.test.ts` | 6 | SPA crawl |
 | `crypto.test.ts` | 6 | AES-GCM round trip and tamper detection |
 | `dispatcher-denylist.test.ts` | 5 | route denylist |
 | `email-sign-in.test.ts` | 4 | magic-link delivery over SMTP, sign-in address rules |
 | `ingest-schema.test.ts` | 3 | over-long page text is cut, not a rejected batch |
 | `session-payload.test.ts` | 1 | `/api/auth/session` never exposes the session token |
+| `sdk-dwell-backend.test.ts` | 5 | SDK dwell timer driven against a real DOM, its events fed to the real detector |
+| `sdk-dwell-stretch-flow.test.ts` | 4 | SDK stretch identity through the wire schema into the real baseline grouping |
+| `baselines-dwell-grouping.test.ts` | 4 | dwell p95 weighted per quiet stretch, not per heartbeat row |
+| `sdk-validity-flow.test.ts` | 8 | runtime `setCustomValidity` capture through ingest into rendered copy |
+| `browser-evidence.test.ts` | 1 | real headless Chromium: browser constraint API, SDK capture, ingest and dispatcher |
+
+The two SDK files run against a live jsdom document, which is a DOM implementation, not a browser. jsdom implements `setCustomValidity` and the constraint API well enough to drive the SDK's real code path, but it does **not** compute `badInput`, and it is not proof of browser behaviour. `sdk-validity-flow.test.ts` therefore mocks the `badInput` validity state (installing both `validity` and `checkValidity` so the two agree) and says so in the test; the real-browser observation is recorded separately in `docs/browser-evidence.md`, captured with headless Chromium against the built SDK.
 
 Coverage is concentrated on the pure, high-risk core: detection rules, dispatcher selection, both parser families, the crypto boundary, and the ElementId hash contract. Those are the components where a silent regression would degrade the product invisibly instead of breaking loudly.
 

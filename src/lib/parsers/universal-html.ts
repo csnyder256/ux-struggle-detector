@@ -579,6 +579,12 @@ function readValidationFromAttrs(
   if (attrs.pattern) v.pattern = attrs.pattern
   if (attrs.step) v.step = Number.isNaN(Number(attrs.step)) ? attrs.step : Number(attrs.step)
   if (tag === 'input' && attrs.type) v.inputType = attrs.type
+  // Note: no validity flags are read from markup here, and none can be.
+  // `setCustomValidity`, `badInput`, `customError` and the rest are runtime
+  // state produced by calling browser APIs on a live element; they are not
+  // markup attributes and do not appear in a source file. The SDK captures
+  // them off the real element (the `validationMessage` it sends with a failing
+  // event), and that is the only path by which they reach the server.
   return v
 }
 
