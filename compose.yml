@@ -1,0 +1,47 @@
+x-app-env: &app-env
+  DATABASE_URL: postgresql://clarus:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/clarus
+  AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
+  KEY_ENCRYPTION_KEY: ${KEY_ENCRYPTION_KEY:?Set KEY_ENCRYPTION_KEY}
+  REQUIRE_AUTH: "true"
+  REQUIRE_INGEST_KEY: "true"
+  AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+  AUTH_TRUST_HOST: "true"
+  EMAIL_SERVER_HOST: ${EMAIL_SERVER_HOST:-}
+  EMAIL_SERVER_PORT: ${EMAIL_SERVER_PORT:-587}
+  EMAIL_SERVER_USER: ${EMAIL_SERVER_USER:-}
+  EMAIL_SERVER_PASSWORD: ${EMAIL_SERVER_PASSWORD:-}
+  EMAIL_FROM: ${EMAIL_FROM:-}
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: clarus
+      POSTGRES_DB: clarus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes: ["clarus-db:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clarus -d clarus"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  app:
+    build: .
+    environment: *app-env
+    ports: ["127.0.0.1:${CLARUS_PORT:-3000}:3000"]
+    depends_on:
+      db: {condition: service_healthy}
+    shm_size: 1gb
+    init: true
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+  setup:
+    profiles: ["setup"]
+    build:
+      context: .
+      target: build
+    environment: *app-env
+    command: ["node", "node_modules/prisma/build/index.js", "db", "push", "--skip-generate"]
+    depends_on:
+      db: {condition: service_healthy}
+volumes:
+  clarus-db:

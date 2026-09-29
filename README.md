@@ -298,3 +298,10 @@ MIT. See [LICENSE](LICENSE).
 ---
 
 Built by Cade (https://github.com/csnyder256). Repository: https://github.com/csnyder256/ux-struggle-detector
+
+
+## Release downloads and deployment
+
+[Latest release](https://github.com/csnyder256/ux-struggle-detector/releases/latest) · [Install, deploy and upgrade](DEPLOYMENT.md)
+
+Release assets include checksums and version-specific notes.

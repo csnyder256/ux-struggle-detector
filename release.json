@@ -1,0 +1,12 @@
+{
+  "name": "ux-struggle-detector",
+  "package_json": [
+    "package.json"
+  ],
+  "version_patterns": {},
+  "extra_assets": [
+    "public/sdk.js",
+    "public/sdk.min.js",
+    "LICENSE"
+  ]
+}
