@@ -82,3 +82,9 @@ Thumbs.db
 
 # Release build output
 dist-release/
+
+/packages/sdk/dist/
+/packages/sdk/LICENSE
+/dist-sdk/
+
+dist-pages/

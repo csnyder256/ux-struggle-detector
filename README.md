@@ -7,7 +7,7 @@
 ![Next.js](https://img.shields.io/badge/next.js-15%20app%20router-000000?style=flat-square&logo=nextdotjs&logoColor=white)
 ![Prisma](https://img.shields.io/badge/prisma-5%20%2F%20postgres-2D3748?style=flat-square&logo=prisma&logoColor=white)
 ![Detection rules](https://img.shields.io/badge/struggle%20rules-40-orange?style=flat-square)
-![SDK](https://img.shields.io/badge/browser%20SDK-26%20KB%20minified-informational?style=flat-square)
+![SDK](https://img.shields.io/badge/browser%20SDK-ESM%20%2F%20CJS%20%2F%20script-informational?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 
 Built under the product name **Clarus Heal**. It maps a customer's web app UI, either by reading their GitHub repo or by crawling their live site, then watches real users through a drop-in script tag. Struggle detection runs server-side against 40 named rules, and any intervention it decides to show comes back in the same HTTP response the events arrived in. The customer never edits their application code to add a hint. A PII scrubber runs in the browser before anything is sent.
@@ -17,6 +17,12 @@ Three pillars:
 1. **Map the UI first.** Framework detection across 46 registry entries in 22 families, a Babel AST parser for React and Preact, a universal template scanner for everything else, plus an LLM pass that gives each element a semantic name and intent.
 2. **Watch from the browser.** A dependency-free SDK  capturing 15 event types with client-side PII masking, offline buffering, and sampling.
 3. **Decide and intervene server-side.** 40 detection rules over hydrated session history, then a bandit-driven dispatcher that returns an overlay, tooltip, or hint inline.
+
+## Try the product
+
+[Open the guided live lab](https://csnyder256.github.io/ux-struggle-detector/demo/) to create real browser struggle, inspect the detector, reveal targeted help and export the evidence. Replay the five-step tour or use Stop/Reset to explore the SDK lifecycle. The exercise runs locally after loading and makes no model or ingestion requests.
+
+[Install the released SDK](SDK.md): typed ESM/CommonJS or a script tag, complete accessible tours, explicit teardown, scoped ingestion keys and event hooks. The versioned package, source provenance and SHA-256 checksums are attached to [Releases](https://github.com/csnyder256/ux-struggle-detector/releases).
 
 ---
 

@@ -28,12 +28,16 @@ import { resolveElementId } from './element-id'
 import { scrubText } from './scrubber'
 import { EventBuffer } from './event-buffer'
 import { Transport } from './transport'
-import { RageClickDetector } from './struggle-detector'
-import { renderIntervention, setOutcomeCallback } from './renderers'
+import { RageClickDetector, type DetectorResult } from './struggle-detector'
+import { renderIntervention, setOutcomeCallback, resetRenderers } from './renderers'
 import { NavigationTracker, classifyPopstate, routeFromLocation, type NavigationTrigger } from './route'
 
 export interface InitOptions {
   orgId: string
+  /** Observe the event actually accepted into the local buffer. No input values are included. */
+  onEvent?: (event: RuntimeEvent) => void
+  /** Local rule evidence; the production server remains the system of record. */
+  onLocalStruggle?: (result: Extract<DetectorResult, { detected: true }>) => void
   /** Where to POST event batches. Default `/api/events`. Use `'console'` for local demos. */
   endpoint?: string
   /** Default 4000ms. */
@@ -70,6 +74,7 @@ export interface InitOptions {
 }
 
 let initialized = false
+let cleanup: (() => void) | null = null
 
 /**
  * Module-level handle exposed by `initSelfHealing` so the public `track()` and
@@ -79,6 +84,7 @@ let initialized = false
 interface SdkState {
   emit: (eventType: EventType, el: Element | null, meta?: RuntimeEvent['meta']) => Promise<unknown>
   setUserIdHash: (hash: string | null) => void
+  flush: () => Promise<import('./transport').FlushResult>
 }
 let _state: SdkState | null = null
 
@@ -107,7 +113,10 @@ export function track(name: string, props?: Record<string, string | number | boo
  */
 export function identify(userId: string): void {
   if (!_state) return
-  void hashUserIdentifier(userId).then((hash) => _state?.setUserIdHash(hash))
+  const current = _state
+  void hashUserIdentifier(userId).then((hash) => {
+    if (_state === current) current.setUserIdHash(hash)
+  }).catch(() => undefined)
 }
 
 async function hashUserIdentifier(userId: string): Promise<string> {
@@ -127,6 +136,8 @@ export function initSelfHealing(opts: InitOptions): void {
   // runtime that shares module state with the client, so bail out first.
   if (typeof window === 'undefined' || typeof document === 'undefined') return
   if (initialized) return
+  if (!opts.orgId?.trim()) return
+  if (opts.flushIntervalMs !== undefined && (!Number.isFinite(opts.flushIntervalMs) || opts.flushIntervalMs < 100)) return
   initialized = true
   try {
     initInner(opts)
@@ -135,10 +146,56 @@ export function initSelfHealing(opts: InitOptions): void {
     // but fail closed in production - the host app shouldn't be broken by us.
     // eslint-disable-next-line no-console
     console.warn('[clarus-heal] init failed:', err)
+    destroySelfHealing()
   }
 }
 
+/** Stop collection, timers, pending responses and SDK interventions. Reinitialization is supported. */
+export function destroySelfHealing(): void {
+  cleanup?.()
+  cleanup = null
+  _state = null
+  initialized = false
+  if (typeof document !== 'undefined') resetRenderers()
+}
+
+/** Flush after all already queued element hashes have settled. */
+export async function flush(): Promise<import('./transport').FlushResult> {
+  return _state ? _state.flush() : { sent: 0 }
+}
+
 function initInner(opts: InitOptions): void {
+  let active = true
+  const controller = new window.AbortController()
+  const timers = new Set<number>()
+  const intervals = new Set<number>()
+  const restorers: Array<() => void> = []
+  cleanup = () => {
+    active = false
+    controller.abort()
+    for (const id of timers) window.clearTimeout(id)
+    for (const id of intervals) window.clearInterval(id)
+    for (const restore of restorers) restore()
+    setOutcomeCallback(null)
+  }
+  // Keep the native overloads, including keyboard/mouse event types.
+  const doc = { addEventListener: ((type: string, listener: EventListener, options?: boolean | AddEventListenerOptions) => {
+    document.addEventListener(type, listener, { ...(typeof options === 'boolean' ? { capture: options } : options), signal: controller.signal })
+  }) as Document['addEventListener'] }
+  const win = { addEventListener: ((type: string, listener: EventListener, options?: boolean | AddEventListenerOptions) => {
+    window.addEventListener(type, listener, { ...(typeof options === 'boolean' ? { capture: options } : options), signal: controller.signal })
+  }) as Window['addEventListener'] }
+  function after(fn: () => void, ms: number): number {
+    const id = window.setTimeout(() => { timers.delete(id); if (active) fn() }, ms)
+    timers.add(id)
+    return id
+  }
+  function every(fn: () => void, ms: number): number {
+    const id = window.setInterval(() => { if (active) fn() }, ms)
+    intervals.add(id)
+    return id
+  }
+
   const endpoint = opts.endpoint ?? '/api/events'
   const flushIntervalMs = opts.flushIntervalMs ?? 4000
   const sessionId = ensureSessionId()
@@ -151,9 +208,10 @@ function initInner(opts: InitOptions): void {
     buffer,
     0,
     (interventions) => {
-      for (const interv of interventions) renderIntervention(interv)
+      if (active) for (const interv of interventions) renderIntervention(interv)
     },
     opts.ingestKey,
+    controller.signal,
   )
   const rage = new RageClickDetector()
 
@@ -319,7 +377,7 @@ function initInner(opts: InitOptions): void {
     el: Element | null,
     meta?: RuntimeEvent['meta'],
   ): Promise<RuntimeEvent | null> {
-    if (disabled.has(eventType)) return null
+    if (!active || disabled.has(eventType)) return null
     // Which element a later DWELL will name. A disabled event type is not an
     // interaction the SDK recorded, so it does not move the pointer either.
     // Intervention outcome events (CUSTOM with meta.kind = 'intervention_*')
@@ -350,12 +408,14 @@ function initInner(opts: InitOptions): void {
       page: snapshotPageContext(),
       element: elementContextFor(el),
     }
+    if (!active) return null
     buffer.push(event)
+    try { opts.onEvent?.(JSON.parse(JSON.stringify(event)) as RuntimeEvent) } catch { /* Observers cannot break collection. */ }
     return event
   }
 
   // ── Click ────────────────────────────────────────────────────────────────
-  document.addEventListener(
+  doc.addEventListener(
     'click',
     (e) => {
       const target = e.target as Element | null
@@ -372,6 +432,9 @@ function initInner(opts: InitOptions): void {
       void emit('CLICK', interactive, meta).then((ev) => {
         if (!ev) return
         const result = rage.observe(ev.elementId)
+        if (result.detected) {
+          try { opts.onLocalStruggle?.(result) } catch { /* Isolate host callback failures. */ }
+        }
         if (result.detected && opts.enableLocalDemoOverlays) {
           renderIntervention({
             id: `local_${Date.now()}`,
@@ -388,7 +451,7 @@ function initInner(opts: InitOptions): void {
   )
 
   // ── Submit ───────────────────────────────────────────────────────────────
-  document.addEventListener(
+  doc.addEventListener(
     'submit',
     (e) => {
       const form = e.target as HTMLFormElement | null
@@ -407,13 +470,13 @@ function initInner(opts: InitOptions): void {
   // ── Input change (debounced + scrubbed) ──────────────────────────────────
   let inputDebounce: number | undefined
   const inputElementMeta = new Map<Element, { lastLength: number }>()
-  document.addEventListener(
+  doc.addEventListener(
     'input',
     (e) => {
       const target = e.target as HTMLInputElement | HTMLTextAreaElement | null
       if (!target) return
       window.clearTimeout(inputDebounce)
-      inputDebounce = window.setTimeout(() => {
+      inputDebounce = after(() => {
         const value = scrubText(target.value ?? '', opts.piiPatterns)
         const length = value.length
         const prev = inputElementMeta.get(target)?.lastLength ?? 0
@@ -425,7 +488,7 @@ function initInner(opts: InitOptions): void {
   )
 
   // ── Focus / Blur ─────────────────────────────────────────────────────────
-  document.addEventListener(
+  doc.addEventListener(
     'focus',
     (e) => {
       const target = e.target
@@ -434,7 +497,7 @@ function initInner(opts: InitOptions): void {
     },
     { capture: true, passive: true },
   )
-  document.addEventListener(
+  doc.addEventListener(
     'blur',
     (e) => {
       const target = e.target
@@ -445,15 +508,15 @@ function initInner(opts: InitOptions): void {
   )
 
   // ── Paste / Copy ─────────────────────────────────────────────────────────
-  document.addEventListener('paste', (e) => {
+  doc.addEventListener('paste', (e) => {
     void emit('PASTE', e.target as Element | null)
   }, { capture: true, passive: true })
-  document.addEventListener('copy', (e) => {
+  doc.addEventListener('copy', (e) => {
     void emit('COPY', e.target as Element | null)
   }, { capture: true, passive: true })
 
   // ── Keydown (Tab navigation only - narrow scope so we don't spam) ───────
-  document.addEventListener(
+  doc.addEventListener(
     'keydown',
     (e) => {
       if (e.key !== 'Tab' && e.key !== 'Escape' && e.key !== 'Enter') return
@@ -465,7 +528,7 @@ function initInner(opts: InitOptions): void {
   // ── Hover (debounced; only on interactive-ish elements) ──────────────────
   let hoverTimer: number | undefined
   let lastHoverEl: Element | null = null
-  document.addEventListener(
+  doc.addEventListener(
     'mouseover',
     (e) => {
       const target = e.target as Element | null
@@ -475,7 +538,7 @@ function initInner(opts: InitOptions): void {
       if (!interactive || interactive === lastHoverEl) return
       lastHoverEl = interactive
       window.clearTimeout(hoverTimer)
-      hoverTimer = window.setTimeout(() => {
+      hoverTimer = after(() => {
         const meta: RuntimeEvent['meta'] = {}
         if (interactive.hasAttribute('title')) meta.tooltip = true
         // A hover names its element, but only once the dwell that follows is
@@ -494,7 +557,7 @@ function initInner(opts: InitOptions): void {
   // ── Scroll (throttled) ───────────────────────────────────────────────────
   let scrollLastTs = 0
   let scrollLastY = window.scrollY
-  window.addEventListener(
+  win.addEventListener(
     'scroll',
     () => {
       const now = Date.now()
@@ -588,7 +651,7 @@ function initInner(opts: InitOptions): void {
     'FOCUS',
     'HOVER',
   ])
-  document.addEventListener(
+  doc.addEventListener(
     'mousemove',
     (e) => {
       pendingHoverEl = e.target as Element | null
@@ -617,7 +680,7 @@ function initInner(opts: InitOptions): void {
     // previous element should stand rather than be cleared.
     if (eventType === 'HOVER' && !lastStrongInteractEl && pendingHoverEl) lastInteractEl = pendingHoverEl
   }
-  window.setInterval(() => {
+  every(() => {
     const quietMs = Date.now() - lastInteractTs
     // The stretch is measured from the last real interaction or from the start
     // of this stretch, whichever is later - never from a report that merely
@@ -635,21 +698,21 @@ function initInner(opts: InitOptions): void {
     }
   }, 1000)
   // ── JS errors ────────────────────────────────────────────────────────────
-  window.addEventListener('error', (e) => {
+  win.addEventListener('error', (e) => {
     void emit('JS_ERROR', null, {
       message: e.message ?? 'unknown',
       filename: e.filename ?? '',
       lineno: e.lineno ?? 0,
     })
   })
-  window.addEventListener('unhandledrejection', (e) => {
+  win.addEventListener('unhandledrejection', (e) => {
     void emit('JS_ERROR', null, {
       message: String((e as PromiseRejectionEvent).reason ?? 'unhandled rejection'),
     })
   })
 
   // ── Validation errors (custom event the host app can dispatch) ───────────
-  document.addEventListener('clarus-heal:validation', ((e: Event) => {
+  doc.addEventListener('clarus-heal:validation', ((e: Event) => {
     const detail = (e as CustomEvent).detail ?? {}
     void emit('VALIDATION_ERROR', detail.element ?? null, {
       kind: detail.kind ?? 'format',
@@ -658,10 +721,10 @@ function initInner(opts: InitOptions): void {
   }) as EventListener)
 
   // ── Window blur/focus (tab hopping detection) ────────────────────────────
-  window.addEventListener('blur', () => {
+  win.addEventListener('blur', () => {
     void emit('BLUR', null, { target: 'window' })
   })
-  window.addEventListener('focus', () => {
+  win.addEventListener('focus', () => {
     void emit('FOCUS', null, { target: 'window' })
   })
 
@@ -683,44 +746,54 @@ function initInner(opts: InitOptions): void {
   const navigationApi = (window as { navigation?: EventTarget }).navigation
   navigationApi?.addEventListener('navigate', ((e: Event & { navigationType?: string }) => {
     lastNavigationType = e.navigationType ?? null
-  }) as EventListener)
-  window.addEventListener('popstate', () => {
+  }) as EventListener, { signal: controller.signal })
+  win.addEventListener('popstate', () => {
     const trigger = classifyPopstate(lastNavigationType)
     lastNavigationType = null
     navigated(trigger)
   })
   // Hash-mode routers move by changing the fragment.
-  window.addEventListener('hashchange', () => navigated('hashchange'))
+  win.addEventListener('hashchange', () => navigated('hashchange'))
 
   // SPA pushState / replaceState patches. Some routers navigate with
   // replaceState (redirects, `replace: true` links); NavigationTracker
   // ignores the many replaceState calls that do not change the URL.
-  const _pushState = history.pushState.bind(history)
+  const originalPush = history.pushState
+  const _pushState = originalPush.bind(history)
   history.pushState = function (data: unknown, unused: string, url?: string | URL | null) {
     _pushState(data, unused, url)
     navigated('pushstate')
   } as typeof history.pushState
-  const _replaceState = history.replaceState.bind(history)
+  const patchedPush = history.pushState
+  const originalReplace = history.replaceState
+  const _replaceState = originalReplace.bind(history)
   history.replaceState = function (data: unknown, unused: string, url?: string | URL | null) {
     _replaceState(data, unused, url)
     navigated('replacestate')
   } as typeof history.replaceState
 
+  const patchedReplace = history.replaceState
+  restorers.push(() => {
+    if (history.pushState === patchedPush) history.pushState = originalPush
+    if (history.replaceState === patchedReplace) history.replaceState = originalReplace
+  })
+
   // Expose emit + identity setter to the module-level handle so the public
   // track() / identify() APIs route through the same buffer.
   _state = {
     emit: emit as SdkState['emit'],
+    flush: async () => { await emitChain; return active ? transport.flush() : { sent: 0 } },
     setUserIdHash: (h) => {
       userIdHash = h
     },
   }
 
   // ── Periodic + best-effort flush ────────────────────────────────────────
-  window.setInterval(() => void transport.flush(), flushIntervalMs)
-  window.addEventListener('beforeunload', () => {
+  every(() => void transport.flush(), flushIntervalMs)
+  win.addEventListener('beforeunload', () => {
     void transport.flush()
   })
-  document.addEventListener('visibilitychange', () => {
+  doc.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') void transport.flush()
   })
 }
@@ -731,6 +804,7 @@ function initInner(opts: InitOptions): void {
  * call this - the server is the system of record.
  */
 export { renderIntervention } from './renderers'
+export { startTour, type TourOptions, type TourStep, type TourHandle } from './tours'
 
 /**
  * Script-tag auto-init.
@@ -782,19 +856,6 @@ export function readAutoInitOptions(doc?: AutoInitDocument): InitOptions | null 
     endpoint,
     flushIntervalMs: Number.isFinite(flushIntervalMs) ? flushIntervalMs : undefined,
   }
-}
-
-function autoInitFromScriptTag(): void {
-  const opts = readAutoInitOptions()
-  if (opts) initSelfHealing(opts)
-}
-
-// Run on module load. Wrapped so a parse error in the host page doesn't
-// destabilize the SDK - initSelfHealing has its own try/catch too.
-try {
-  autoInitFromScriptTag()
-} catch {
-  // Ignore - host page may have unusual DOM state.
 }
 
 function ensureSessionId(): string {

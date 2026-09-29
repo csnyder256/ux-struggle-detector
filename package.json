@@ -1,6 +1,6 @@
 {
   "name": "clarus-heal",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -11,10 +11,14 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
-    "sdk:build": "esbuild src/sdk/index.ts --bundle --format=iife --global-name=ClarusHeal --outfile=public/sdk.js --target=es2020 --legal-comments=none",
-    "sdk:build:min": "esbuild src/sdk/index.ts --bundle --format=iife --global-name=ClarusHeal --outfile=public/sdk.min.js --target=es2020 --minify --legal-comments=none",
+    "sdk:build": "esbuild src/sdk/script-entry.ts --bundle --format=iife --global-name=ClarusHeal --outfile=public/sdk.js --target=es2020 --legal-comments=none",
+    "sdk:build:min": "esbuild src/sdk/script-entry.ts --bundle --format=iife --global-name=ClarusHeal --outfile=public/sdk.min.js --target=es2020 --minify --legal-comments=none",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "sdk:package": "node scripts/build-sdk-package.mjs",
+    "demo:build": "esbuild src/demo/product-demo.ts --bundle --format=iife --outfile=public/demo/demo.js --target=es2020 --minify --legal-comments=none",
+    "sdk:verify": "node scripts/verify-sdk-consumer.mjs",
+    "demo:verify": "node scripts/verify-sdk-demo.cjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",

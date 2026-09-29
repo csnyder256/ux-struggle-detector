@@ -390,12 +390,7 @@ pnpm db:migrate
 pnpm dev</code></pre>
     <p>Installing the SDK on a customer's page is one script tag, or two if you prefer explicit options:</p>
 <pre><code>&lt;script src="/sdk.min.js" data-org-id="org_..." data-ingest-key="ck_..."&gt;&lt;/script&gt;</code></pre>
-    <p>
-      Open-access mode is the default (<code>REQUIRE_AUTH="false"</code>, <code>REQUIRE_INGEST_KEY="false"</code>):
-      no sign-in, everything runs against an auto-provisioned demo org, and the Settings page can seed synthetic
-      data. <code>public/demo/index.html</code> is a standalone harness that runs in console mode with no server
-      and no database, which is the fastest way to watch detection fire.
-    </p>
+    <p>The production Compose deployment requires authentication and scoped ingestion keys. The <a href="demo/">guided live lab</a> runs the real collector, detector and intervention renderer locally, with no ingestion server or database. Complete the five-step tour and export its evidence, then follow the <a href="https://github.com/csnyder256/ux-struggle-detector/blob/main/SDK.md">SDK integration guide</a> for production.</p>
     <p>
       Longer walkthroughs live in the repo:
       <a href="https://github.com/csnyder256/ux-struggle-detector/blob/main/GETTING_STARTED.md">GETTING_STARTED.md</a>

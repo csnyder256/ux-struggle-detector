@@ -52,8 +52,17 @@ jobs:
           pnpm sdk:build
           pnpm sdk:build:min
 
+      - name: Build installable SDK and guided demo
+        run: |
+          pnpm sdk:package
+          pnpm demo:build
+          pnpm sdk:verify
+      - name: Install browser for acceptance checks
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Exercise real guided demo on desktop and mobile
+        run: pnpm demo:verify
       - name: Fail if the checked-in SDK bundles are stale
-        run: git diff --exit-code -- public/sdk.js public/sdk.min.js
+        run: git diff --exit-code -- public/sdk.js public/sdk.min.js public/demo/demo.js
 
       # Typecheck and unit tests do not load every module the way the
       # production bundle does. A dependency that breaks at bundle time
