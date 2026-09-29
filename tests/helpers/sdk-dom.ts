@@ -1,6 +1,4 @@
 import { JSDOM } from 'jsdom'
-import { initSelfHealing } from '@/sdk'
-import { Transport } from '@/sdk/transport'
 import { detectStruggles } from '@/lib/struggle/detect'
 import type { ElementBaseline, DetectorContext } from '@/lib/struggle/detect'
 import type { RuntimeEvent } from '@/lib/types/events'
@@ -77,6 +75,14 @@ export async function bootSdk(html: string, now = 1_700_000_000_000): Promise<Sd
   vi.useFakeTimers()
   vi.setSystemTime(now)
   installDom(html)
+  const sdkWin = globalThis.window as unknown as Window & typeof globalThis
+  // jsdom imports Node's real timers before vi.useFakeTimers(). Its window
+  // wrappers therefore keep scheduling in wall time while Date.now() advances
+  // virtually. Bind the browser timer surface to the same fake clock as Date.
+  sdkWin.setTimeout = globalThis.setTimeout as unknown as typeof sdkWin.setTimeout
+  sdkWin.clearTimeout = globalThis.clearTimeout as unknown as typeof sdkWin.clearTimeout
+  sdkWin.setInterval = globalThis.setInterval as unknown as typeof sdkWin.setInterval
+  sdkWin.clearInterval = globalThis.clearInterval as unknown as typeof sdkWin.clearInterval
 
   // `initialized` is module scope in the SDK, so a second boot in the same
   // module graph would silently install no listeners at all and the test would
@@ -122,6 +128,8 @@ export async function bootSdk(html: string, now = 1_700_000_000_000): Promise<Sd
       pushSpy.mockRestore()
       fetchSpy.mockRestore()
       flushSpy.mockRestore()
+      vi.clearAllTimers()
+      sdkWin.close()
       vi.useRealTimers()
     },
   }
