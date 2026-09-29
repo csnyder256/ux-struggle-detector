@@ -4,15 +4,15 @@ Captured with **headless Chromium driving the built SDK bundle** — not jsdom.
 
 | Fact | Value |
 | --- | --- |
-| Source (at capture) | `SDK bundles are byte-identical to HEAD b5456f4e5035e12a8d0a9d3ac58afa76c9f6e505; bundle inputs dirty at capture (src/sdk/index.ts); working tree DIRTY at capture (20 path(s) uncommitted, e.g. .gitignore, VERSION, package.json, public/demo/index.html) - the capture uses the measured bundle bytes and records working-tree edits` |
-| HEAD at capture | `b5456f4e5035e12a8d0a9d3ac58afa76c9f6e505` |
-| SDK bundle bytes vs HEAD | match - `public/sdk.js` and `public/sdk.min.js` are byte-identical to the blobs committed at `b5456f4e5035e12a8d0a9d3ac58afa76c9f6e505` (compared via `git show HEAD:<path>` sha256, not via `git status`) |
-| Bundle inputs at capture | **dirty** - uncommitted edits to `src/sdk/index.ts` |
-| Working tree at capture | **DIRTY** - 20 uncommitted path(s): `.gitignore`, `VERSION`, `package.json`, `public/demo/index.html`, `release.json`, `src/sdk/element-id.ts`, `src/sdk/index.ts`, `src/sdk/renderers.ts`, `src/sdk/transport.ts`, `tsconfig.json`, `packages/`, `public/demo/demo.js`, `public/demo/style.css`, `scripts/build-sdk-package.mjs`, `src/demo/`, `src/sdk/package-entry.ts`, `src/sdk/script-entry.ts`, `src/sdk/tours.ts`, `tests/sdk-lifecycle-tour.test.ts`, `tsconfig.sdk.json`. This capture records the measured SDK bundle bytes above and uncommitted paths relative to `b5456f4e5035e12a8d0a9d3ac58afa76c9f6e505` |
+| Source (at capture) | `SDK bundles DIFFER from HEAD dbe4d514a1a53e8eba1615f6c60487d62bf5d6df; bundle inputs dirty at capture (public/sdk.js, public/sdk.min.js, src/sdk/index.ts); working tree DIRTY at capture (4 path(s) uncommitted, e.g. public/demo/demo.js, public/sdk.js, public/sdk.min.js, src/sdk/index.ts) - the capture uses the measured bundle bytes and records working-tree edits` |
+| HEAD at capture | `dbe4d514a1a53e8eba1615f6c60487d62bf5d6df` |
+| SDK bundle bytes vs HEAD | **DIFFER** - the executed bundle is not the blob committed at `dbe4d514a1a53e8eba1615f6c60487d62bf5d6df` |
+| Bundle inputs at capture | **dirty** - uncommitted edits to `public/sdk.js`, `public/sdk.min.js`, `src/sdk/index.ts` |
+| Working tree at capture | **DIRTY** - 4 uncommitted path(s): `public/demo/demo.js`, `public/sdk.js`, `public/sdk.min.js`, `src/sdk/index.ts`. This capture records the measured SDK bundle bytes above and uncommitted paths relative to `dbe4d514a1a53e8eba1615f6c60487d62bf5d6df` |
 | Chromium | `Chromium 154.0.8037.57 built on Debian GNU/Linux 12 (bookworm)` (`/usr/bin/chromium`) |
 | Node | `v22.23.2` |
-| `public/sdk.js` sha256 | `27e973f89e3b1387f91c4c0a4d8031c199ceb1f32f9866cfccd61e2ce7c97728` |
-| `public/sdk.min.js` sha256 | `6dbd4139d426e14114ee24c7a06ee7f0c861401f7f36639090dbde9794af49a6` |
+| `public/sdk.js` sha256 | `f15680ceff8724ffe9d9b79bc629fe30e33f0758ac90fcaa527560cb86d9717c` |
+| `public/sdk.min.js` sha256 | `837a2e384f2f1af6ee10bee021c23e40af09024b43c0317a1b303a14fc793c1e` |
 
 Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
 
@@ -20,38 +20,24 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
 
 ```json
 {
-  "headAtCapture": "b5456f4e5035e12a8d0a9d3ac58afa76c9f6e505",
+  "headAtCapture": "dbe4d514a1a53e8eba1615f6c60487d62bf5d6df",
   "workingTreeDirtyAtCapture": true,
   "dirtyPathsAtCapture": [
-    ".gitignore",
-    "VERSION",
-    "package.json",
-    "public/demo/index.html",
-    "release.json",
-    "src/sdk/element-id.ts",
-    "src/sdk/index.ts",
-    "src/sdk/renderers.ts",
-    "src/sdk/transport.ts",
-    "tsconfig.json",
-    "packages/",
     "public/demo/demo.js",
-    "public/demo/style.css",
-    "scripts/build-sdk-package.mjs",
-    "src/demo/",
-    "src/sdk/package-entry.ts",
-    "src/sdk/script-entry.ts",
-    "src/sdk/tours.ts",
-    "tests/sdk-lifecycle-tour.test.ts",
-    "tsconfig.sdk.json"
+    "public/sdk.js",
+    "public/sdk.min.js",
+    "src/sdk/index.ts"
   ],
   "bundleSourceDirtyAtCapture": true,
   "bundleDirtyPathsAtCapture": [
+    "public/sdk.js",
+    "public/sdk.min.js",
     "src/sdk/index.ts"
   ],
-  "sdkBundleMatchesHead": true,
-  "sdkMinBundleMatchesHead": true,
-  "bundleMatchesHead": true,
-  "sourceLabel": "SDK bundles are byte-identical to HEAD b5456f4e5035e12a8d0a9d3ac58afa76c9f6e505; bundle inputs dirty at capture (src/sdk/index.ts); working tree DIRTY at capture (20 path(s) uncommitted, e.g. .gitignore, VERSION, package.json, public/demo/index.html) - the capture uses the measured bundle bytes and records working-tree edits"
+  "sdkBundleMatchesHead": false,
+  "sdkMinBundleMatchesHead": false,
+  "bundleMatchesHead": false,
+  "sourceLabel": "SDK bundles DIFFER from HEAD dbe4d514a1a53e8eba1615f6c60487d62bf5d6df; bundle inputs dirty at capture (public/sdk.js, public/sdk.min.js, src/sdk/index.ts); working tree DIRTY at capture (4 path(s) uncommitted, e.g. public/demo/demo.js, public/sdk.js, public/sdk.min.js, src/sdk/index.ts) - the capture uses the measured bundle bytes and records working-tree edits"
 }
 ```
 
@@ -112,18 +98,18 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
   "withValidity": [
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790662351418_2skb1dxg_1790662351427_qbs22wms",
-      "sessionId": "sh_sess_1790662351418_2skb1dxg",
+      "idempotencyKey": "sh_sess_1790663757473_iwx28r5h_1790663757481_p5fknjki",
+      "sessionId": "sh_sess_1790663757473_iwx28r5h",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "FOCUS",
-      "ts": "2026-09-29T06:12:31.427Z",
+      "ts": "2026-09-29T06:35:57.481Z",
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 8
+        "ageMs": 7
       },
       "element": {
         "touched": true,
@@ -137,13 +123,13 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790662351418_2skb1dxg_1790662351429_eluivyy6",
-      "sessionId": "sh_sess_1790662351418_2skb1dxg",
+      "idempotencyKey": "sh_sess_1790663757473_iwx28r5h_1790663757483_axngrhr4",
+      "sessionId": "sh_sess_1790663757473_iwx28r5h",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "CLICK",
-      "ts": "2026-09-29T06:12:31.429Z",
+      "ts": "2026-09-29T06:35:57.483Z",
       "meta": {},
       "page": {
         "viewportW": 1280,
@@ -163,18 +149,18 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790662351418_2skb1dxg_1790662351430_bbhi3nxj",
-      "sessionId": "sh_sess_1790662351418_2skb1dxg",
+      "idempotencyKey": "sh_sess_1790663757473_iwx28r5h_1790663757484_bv41all7",
+      "sessionId": "sh_sess_1790663757473_iwx28r5h",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "BLUR",
-      "ts": "2026-09-29T06:12:31.430Z",
+      "ts": "2026-09-29T06:35:57.484Z",
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 11
+        "ageMs": 10
       },
       "element": {
         "touched": true,
@@ -188,13 +174,13 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790662351418_2skb1dxg_1790662351430_2i5cbi1g",
-      "sessionId": "sh_sess_1790662351418_2skb1dxg",
+      "idempotencyKey": "sh_sess_1790663757473_iwx28r5h_1790663757485_ro1dozh1",
+      "sessionId": "sh_sess_1790663757473_iwx28r5h",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "FOCUS",
-      "ts": "2026-09-29T06:12:31.430Z",
+      "ts": "2026-09-29T06:35:57.485Z",
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
@@ -212,19 +198,19 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790662351418_2skb1dxg_1790662351431_je9q96nj",
-      "sessionId": "sh_sess_1790662351418_2skb1dxg",
+      "idempotencyKey": "sh_sess_1790663757473_iwx28r5h_1790663757485_3xwthyv6",
+      "sessionId": "sh_sess_1790663757473_iwx28r5h",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "CLICK",
-      "ts": "2026-09-29T06:12:31.431Z",
+      "ts": "2026-09-29T06:35:57.485Z",
       "meta": {},
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 12
+        "ageMs": 11
       },
       "element": {
         "touched": true,

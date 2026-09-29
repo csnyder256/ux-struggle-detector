@@ -137,7 +137,7 @@ export function initSelfHealing(opts: InitOptions): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return
   if (initialized) return
   if (!opts.orgId?.trim()) return
-  if (opts.flushIntervalMs !== undefined && (!Number.isFinite(opts.flushIntervalMs) || opts.flushIntervalMs < 100)) return
+  if (opts.flushIntervalMs !== undefined && (!Number.isFinite(opts.flushIntervalMs) || opts.flushIntervalMs <= 0)) return
   initialized = true
   try {
     initInner(opts)

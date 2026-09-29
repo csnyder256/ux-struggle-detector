@@ -1146,7 +1146,7 @@ var ClarusHeal = (() => {
     if (typeof window === "undefined" || typeof document === "undefined") return;
     if (initialized) return;
     if (!opts.orgId?.trim()) return;
-    if (opts.flushIntervalMs !== void 0 && (!Number.isFinite(opts.flushIntervalMs) || opts.flushIntervalMs < 100)) return;
+    if (opts.flushIntervalMs !== void 0 && (!Number.isFinite(opts.flushIntervalMs) || opts.flushIntervalMs <= 0)) return;
     initialized = true;
     try {
       initInner(opts);
