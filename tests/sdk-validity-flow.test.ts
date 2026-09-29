@@ -60,17 +60,18 @@ function interval(copy: string): string {
 
 /**
  * Let the SDK's async emit chain settle until at least one event matching
- * `pred` has landed in the buffer, or the tick budget runs out. A fixed single
- * tick is not enough: `emit` chains through `resolveElementId` (WebCrypto), so
- * under parallel test load the event can arrive a tick later. Waiting on the
- * observable keeps the test dependent on the SDK, not on scheduler timing.
+ * `pred` has landed in the buffer, or the tick budget runs out. Await the real
+ * SDK flush barrier: fake clock advances and microtask yields cannot guarantee
+ * native WebCrypto completion on a loaded runner. Transport is mocked by the
+ * shared harness, so this settles real capture without network access.
  */
 async function settleUntil(
-  run: { events: RuntimeEvent[] },
+  run: { events: RuntimeEvent[]; settle: () => Promise<unknown> },
   pred: (e: RuntimeEvent) => boolean,
   maxTicks = 40,
 ): Promise<void> {
   for (let i = 0; i < maxTicks; i++) {
+    await run.settle()
     if (run.events.some(pred)) return
     await tick(1_000)
   }
