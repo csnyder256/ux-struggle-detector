@@ -16,6 +16,8 @@ export interface SdkRun {
   /** The document the SDK is watching. */
   doc: Document
   win: Window & typeof globalThis
+  /** Await the SDK's actual queued element hashes and mocked transport. */
+  settle: () => Promise<unknown>
   stop: () => void
 }
 
@@ -90,7 +92,7 @@ export async function bootSdk(html: string, now = 1_700_000_000_000): Promise<Sd
   vi.resetModules()
 
   const events: RuntimeEvent[] = []
-  const { initSelfHealing } = await import('@/sdk')
+  const { initSelfHealing, destroySelfHealing, flush } = await import('@/sdk')
   const { EventBuffer } = await import('@/sdk/event-buffer')
   const { Transport } = await import('@/sdk/transport')
   const bufferPush = EventBuffer.prototype.push
@@ -124,7 +126,9 @@ export async function bootSdk(html: string, now = 1_700_000_000_000): Promise<Sd
     events,
     doc: sdkDoc,
     win: globalThis.window as unknown as Window & typeof globalThis,
+    settle: flush,
     stop: () => {
+      destroySelfHealing()
       pushSpy.mockRestore()
       fetchSpy.mockRestore()
       flushSpy.mockRestore()
@@ -141,13 +145,13 @@ export async function bootSdk(html: string, now = 1_700_000_000_000): Promise<Sd
  * `advanceTimersByTimeAsync` can deliver more than one 1s interval callback for
  * a single advance depending on how the fake clock drains, and the SDK's emit
  * path is promise-chained (element IDs hash through WebCrypto). Draining the
- * microtask queue after the advance makes one `tick(1000)` mean "the SDK has
- * settled its work for one more second", so callers can reason about a tick
- * count instead of about the scheduler's internal batching.
+ * microtask queue after the advance lets promise continuations run. WebCrypto
+ * itself runs outside this queue: use `run.settle()` when asserting on the
+ * completion of a queued capture, rather than a fixed number of fake ticks.
  */
 export async function tick(ms: number): Promise<void> {
   await vi.advanceTimersByTimeAsync(ms)
-  // Let every queued microtask (emit chain, hashing) run to completion.
+  // Yield to continuations; this does not wait for native WebCrypto jobs.
   for (let i = 0; i < 5; i++) await Promise.resolve()
 }
 
