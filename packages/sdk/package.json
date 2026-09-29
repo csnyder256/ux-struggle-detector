@@ -1,0 +1,47 @@
+{
+  "name": "@csnyder256/ux-struggle-sdk",
+  "version": "0.3.0",
+  "description": "Framework-independent UX struggle collection, interventions and accessible tours",
+  "type": "module",
+  "license": "MIT",
+  "author": "Cade",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/csnyder256/ux-struggle-detector.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://csnyder256.github.io/ux-struggle-detector/",
+  "bugs": {
+    "url": "https://github.com/csnyder256/ux-struggle-detector/issues"
+  },
+  "keywords": [
+    "ux",
+    "analytics",
+    "onboarding",
+    "tours",
+    "struggle-detection"
+  ],
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/types/sdk/package-entry.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/sdk/package-entry.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./script": "./dist/sdk.min.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

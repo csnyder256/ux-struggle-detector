@@ -1,0 +1,45 @@
+name: Publish SDK to npm
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable release tag to publish
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  publish:
+    if: vars.NPM_TRUSTED_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      - name: Check tagged version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          test "$RELEASE_TAG" = "v$(cat VERSION)"
+          python scripts/verify_release.py
+      - name: Download verified released package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: csnyder256/ux-struggle-detector
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          mkdir dist-sdk
+          gh release download "$RELEASE_TAG" --pattern '*.tgz' --pattern 'sdk-provenance.json' --pattern 'checksums.txt' --dir dist-sdk
+          python scripts/verify-sdk-provenance.py
+      - name: Publish using the configured npm trusted publisher
+        run: npm publish "dist-sdk/csnyder256-ux-struggle-sdk-$(cat VERSION).tgz" --access public --provenance

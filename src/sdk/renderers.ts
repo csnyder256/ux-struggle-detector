@@ -13,6 +13,7 @@
  */
 
 import type { DispatchedIntervention, InterventionRenderType } from '../lib/types/events'
+import { startTour, closeTours, type TourStep } from './tours'
 import type { ElementId } from '../lib/types/ui-map'
 
 const ROOT_ID = '__sh_root__'
@@ -32,6 +33,25 @@ const REDUCED =
   window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 const shown = new Set<string>()
+const pending = new Map<number, () => void>()
+const detachments = new Set<() => void>()
+function later(fn: () => void, ms: number): number {
+  const id = window.setTimeout(() => { pending.delete(id); fn() }, ms)
+  pending.set(id, fn)
+  return id
+}
+/** Tear down every SDK-owned DOM treatment, timer and document/target listener. */
+export function resetRenderers(): void {
+  closeTours()
+  for (const [id, finish] of pending) { window.clearTimeout(id); finish() }
+  pending.clear()
+  for (const detach of [...detachments]) detach()
+  detachments.clear()
+  document.getElementById(ROOT_ID)?.remove()
+  document.getElementById('__sh_styles__')?.remove()
+  shown.clear()
+  outcomeCallback = null
+}
 
 export type OutcomeKind = 'shown' | 'dismissed' | 'success'
 export type OutcomeCallback = (interventionId: string, outcome: OutcomeKind) => void
@@ -61,6 +81,7 @@ function root(): HTMLElement {
     } as Partial<CSSStyleDeclaration>)
     // Inject a stylesheet for keyframes / a11y once.
     const style = document.createElement('style')
+    style.id = '__sh_styles__'
     style.textContent = `
       @keyframes __sh_pulse__ {
         0%   { box-shadow: 0 0 0 0 rgba(59,130,246,.55), 0 0 0 0 rgba(59,130,246,.4); }
@@ -95,15 +116,17 @@ export function renderIntervention(d: DispatchedIntervention): void {
 
   const target = d.targetElementId ? findElement(d.targetElementId) : null
   // Watch for the success signal - user clicks the target within 30s.
-  if (target) {
+  if (target && d.type !== 'TOUR') {
     const handler = () => {
       reportOutcome(outcomeId, 'success')
       target.removeEventListener('click', handler, true)
     }
+    const detach = () => { target.removeEventListener('click', handler, true); detachments.delete(detach) }
+    detachments.add(detach)
     target.addEventListener('click', handler, { capture: true, once: true })
-    window.setTimeout(() => target.removeEventListener('click', handler, true), 30_000)
+    later(detach, 30_000)
   }
-  const ttl = typeof d.autoDismissMs === 'number' && d.autoDismissMs > 0 ? d.autoDismissMs : 8000
+  const ttl = typeof d.autoDismissMs === 'number' && d.autoDismissMs >= 0 ? d.autoDismissMs : 8000
 
   switch (d.type) {
     case 'OVERLAY':
@@ -138,7 +161,7 @@ export function renderIntervention(d: DispatchedIntervention): void {
 }
 
 function findElement(id: ElementId): HTMLElement | null {
-  return document.querySelector<HTMLElement>(`[data-sh-id="${id}"]`)
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-sh-id]')).find(el => el.getAttribute('data-sh-id') === id) ?? null
 }
 
 // ── small shared helpers ────────────────────────────────────────────────────
@@ -167,7 +190,7 @@ function makeDismissBtn(onDismiss: () => void, interventionId?: string): HTMLBut
 
 function autoCleanup(el: HTMLElement, ms: number, onRemove?: () => void): void {
   if (ms <= 0) return
-  window.setTimeout(() => {
+  later(() => {
     onRemove?.()
     el.remove()
   }, ms)
@@ -203,7 +226,9 @@ function attachEscDismiss(el: HTMLElement, interventionId?: string, onRemove?: (
     document.removeEventListener('keydown', onKey, true)
   }
   document.addEventListener('keydown', onKey, true)
-  return () => document.removeEventListener('keydown', onKey, true)
+  const detach = () => { document.removeEventListener('keydown', onKey, true); detachments.delete(detach) }
+  detachments.add(detach)
+  return detach
 }
 
 /**
@@ -240,10 +265,13 @@ function trapFocus(el: HTMLElement): () => void {
     }
   }
   document.addEventListener('keydown', onKey, true)
-  return () => {
+  const detach = () => {
     document.removeEventListener('keydown', onKey, true)
     previouslyFocused?.focus?.()
+    detachments.delete(detach)
   }
+  detachments.add(detach)
+  return detach
 }
 
 function flashRing(target: HTMLElement, kind: 'pulse' | 'glow' | 'spotlight'): HTMLElement {
@@ -353,7 +381,7 @@ function renderOverlay(
   card.appendChild(row)
   root().appendChild(card)
   // Lower-confidence interventions auto-dismiss faster.
-  const adjustedTtl = conf >= 0.85 ? ttl : conf >= 0.5 ? Math.max(4000, ttl * 0.75) : Math.max(3000, ttl * 0.5)
+  const adjustedTtl = ttl === 0 ? 0 : conf >= 0.85 ? ttl : conf >= 0.5 ? Math.max(4000, ttl * 0.75) : Math.max(3000, ttl * 0.5)
   autoCleanup(card, adjustedTtl, detachEsc)
 }
 
@@ -612,10 +640,16 @@ function renderInlineHint(target: HTMLElement | null, d: DispatchedIntervention,
 }
 
 function renderTour(d: DispatchedIntervention, outcomeId: string = d.id) {
-  // MVP tour: render as a modal with the title + copy. Real multi-step tours
-  // use the TourConfig steps array, populated by the dispatcher in a later
-  // phase.
-  renderModal({ ...d, type: 'MODAL' }, outcomeId)
+  let steps: TourStep[] = [{ title: d.title || 'A little guidance', copy: d.copy, targetElementId: d.targetElementId ?? undefined }]
+  if (typeof d.options?.steps === 'string') {
+    try {
+      if (d.options.steps.length > 100_000) return
+      steps = JSON.parse(d.options.steps) as TourStep[]
+    } catch { return }
+  }
+  try {
+    startTour({ steps, onFinish: () => reportOutcome(outcomeId, 'success'), onDismiss: () => reportOutcome(outcomeId, 'dismissed') })
+  } catch { /* Malformed server tour data must not break the host page. */ }
 }
 
 function renderIconFlash(target: HTMLElement | null, ttl: number) {
@@ -623,7 +657,7 @@ function renderIconFlash(target: HTMLElement | null, ttl: number) {
   const original = target.style.transition
   target.style.transition = 'background 200ms'
   target.classList.add('__sh_flash__')
-  window.setTimeout(() => {
+  later(() => {
     target.classList.remove('__sh_flash__')
     target.style.transition = original
   }, ttl > 0 ? ttl : 2400)
@@ -664,7 +698,7 @@ function renderArrow(target: HTMLElement | null, d: DispatchedIntervention, ttl:
       arrow.style.transform = up ? 'translateY(0)' : 'translateY(-6px)'
       up = !up
     }, 600)
-    window.setTimeout(() => window.clearInterval(interval), ttl > 0 ? ttl : 6000)
+    later(() => window.clearInterval(interval), ttl > 0 ? ttl : 6000)
   }
   root().appendChild(arrow)
   if (d.copy) renderOverlay(d, ttl)
@@ -691,7 +725,7 @@ function renderAnnounce(d: DispatchedIntervention) {
   region.style.left = '-9999px'
   region.textContent = stripHtml(d.copy)
   root().appendChild(region)
-  window.setTimeout(() => region.remove(), 4000)
+  later(() => region.remove(), 4000)
 }
 
 function decodeHtml(s: string): string {

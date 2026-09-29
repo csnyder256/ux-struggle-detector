@@ -1,12 +1,19 @@
 {
   "name": "ux-struggle-detector",
   "package_json": [
-    "package.json"
+    "package.json",
+    "packages/sdk/package.json"
   ],
   "version_patterns": {},
   "extra_assets": [
     "public/sdk.js",
     "public/sdk.min.js",
-    "LICENSE"
+    "LICENSE",
+    "dist-sdk/csnyder256-ux-struggle-sdk-0.3.0.tgz",
+    "dist-sdk/sdk-provenance.json"
+  ],
+  "built": [
+    "packages/sdk",
+    "dist-sdk"
   ]
 }

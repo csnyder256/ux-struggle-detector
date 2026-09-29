@@ -26,7 +26,12 @@ jobs:
       - run: pnpm test
       - run: pnpm sdk:build
       - run: pnpm sdk:build:min
-      - run: git diff --exit-code -- public/sdk.js public/sdk.min.js
+      - run: pnpm sdk:package
+      - run: pnpm demo:build
+      - run: pnpm sdk:verify
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm demo:verify
+      - run: git diff --exit-code -- public/sdk.js public/sdk.min.js public/demo/demo.js
       - run: python scripts/package_release.py
       - run: python scripts/verify_bundle.py
       - uses: actions/upload-artifact@v7

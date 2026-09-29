@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rootDir": "src",
+    "outDir": "packages/sdk/dist/types",
+    "noUncheckedIndexedAccess": true
+  },
+  "include": [
+    "src/sdk/package-entry.ts"
+  ]
+}

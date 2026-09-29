@@ -20,13 +20,16 @@ var ClarusHeal = (() => {
   var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
   var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
-  // src/sdk/index.ts
-  var index_exports = {};
-  __export(index_exports, {
+  // src/sdk/script-entry.ts
+  var script_entry_exports = {};
+  __export(script_entry_exports, {
+    destroySelfHealing: () => destroySelfHealing,
+    flush: () => flush,
     identify: () => identify,
     initSelfHealing: () => initSelfHealing,
     readAutoInitOptions: () => readAutoInitOptions,
     renderIntervention: () => renderIntervention,
+    startTour: () => startTour,
     track: () => track
   });
 
@@ -157,6 +160,7 @@ var ClarusHeal = (() => {
 
   // src/sdk/element-id.ts
   var MAX_DEPTH = 20;
+  var runtimeBindings = /* @__PURE__ */ new WeakMap();
   function describeNode(el) {
     const parts = [];
     let cur = el;
@@ -178,10 +182,14 @@ var ClarusHeal = (() => {
   }
   async function resolveElementId(orgId, el) {
     const attr = el.getAttribute("data-sh-id");
-    if (attr && isElementId(attr)) return attr;
-    const filePath = routeFromLocation(window.location);
+    const route = routeFromLocation(window.location);
+    const prior = runtimeBindings.get(el);
+    if (attr && isElementId(attr) && (!prior || prior.id !== attr || prior.route === route && prior.orgId === orgId)) return attr;
     const nodeDescriptor = describeNode(el);
-    return hashElementId({ orgId, filePath, nodeDescriptor });
+    const id = await hashElementId({ orgId, filePath: route, nodeDescriptor });
+    el.setAttribute("data-sh-id", id);
+    runtimeBindings.set(el, { id, route, orgId });
+    return id;
   }
 
   // src/sdk/scrubber.ts
@@ -273,15 +281,17 @@ var ClarusHeal = (() => {
 
   // src/sdk/transport.ts
   var Transport = class {
-    constructor(orgId, endpoint, buffer, clockOffsetMs = 0, onInterventions, ingestKey) {
+    constructor(orgId, endpoint, buffer, clockOffsetMs = 0, onInterventions, ingestKey, signal) {
       __publicField(this, "orgId", orgId);
       __publicField(this, "endpoint", endpoint);
       __publicField(this, "buffer", buffer);
       __publicField(this, "clockOffsetMs", clockOffsetMs);
       __publicField(this, "onInterventions", onInterventions);
       __publicField(this, "ingestKey", ingestKey);
+      __publicField(this, "signal", signal);
     }
     async flush() {
+      if (this.signal?.aborted) return { sent: 0 };
       const events = this.buffer.drain();
       if (events.length === 0) return { sent: 0 };
       const body = {
@@ -303,8 +313,10 @@ var ClarusHeal = (() => {
           method: "POST",
           headers,
           body: JSON.stringify(body),
-          keepalive: true
+          keepalive: true,
+          signal: this.signal
         });
+        if (this.signal?.aborted) return { sent: 0 };
         if (!res.ok) {
           for (const e of events) this.buffer.push(e);
           return { sent: 0, error: `HTTP ${res.status}` };
@@ -314,6 +326,7 @@ var ClarusHeal = (() => {
           response = await res.json();
         } catch {
         }
+        if (this.signal?.aborted) return { sent: 0 };
         const interventions = response?.interventions ?? [];
         if (interventions.length > 0 && this.onInterventions) {
           try {
@@ -323,8 +336,8 @@ var ClarusHeal = (() => {
         }
         return { sent: events.length, interventions };
       } catch (err) {
-        for (const e of events) this.buffer.push(e);
-        return { sent: 0, error: err.message };
+        if (!this.signal?.aborted) for (const e of events) this.buffer.push(e);
+        return { sent: 0, error: this.signal?.aborted ? "Stopped" : err.message };
       }
     }
   };
@@ -348,6 +361,154 @@ var ClarusHeal = (() => {
     }
   };
 
+  // src/sdk/tours.ts
+  var activeTours = /* @__PURE__ */ new Set();
+  var sequence = 0;
+  function closeTours() {
+    for (const close of [...activeTours]) close();
+  }
+  function startTour(options) {
+    if (typeof document === "undefined" || typeof window === "undefined") return null;
+    if (!options || !Array.isArray(options.steps) || options.steps.length < 1 || options.steps.length > 20) throw new TypeError("A tour needs 1\u201320 steps");
+    const steps = options.steps.map((s) => {
+      if (!s || typeof s.title !== "string" || !s.title.trim() || s.title.length > 160 || typeof s.copy !== "string" || s.copy.length > 4e3 || s.selector !== void 0 && (typeof s.selector !== "string" || s.selector.length > 256) || s.targetElementId !== void 0 && (typeof s.targetElementId !== "string" || s.targetElementId.length > 128)) throw new TypeError("Invalid tour step");
+      return { ...s };
+    });
+    closeTours();
+    let index = 0;
+    let closed = false;
+    const priorFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const uid = "__sh_tour_" + ++sequence;
+    const backdrop = document.createElement("div");
+    backdrop.dataset.shTour = "true";
+    backdrop.style.cssText = "position:fixed;inset:0;z-index:2147483645;background:rgba(9,16,31,.55);display:flex;align-items:flex-end;justify-content:center;padding:24px;box-sizing:border-box;pointer-events:auto;font-family:system-ui,sans-serif;";
+    const panel = document.createElement("section");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    panel.setAttribute("aria-labelledby", uid + "_title");
+    panel.setAttribute("aria-describedby", uid + "_body");
+    panel.style.cssText = "position:relative;z-index:2;background:#fff;color:#172033;border:1px solid #dbe4ee;border-radius:18px;padding:24px;width:520px;max-width:100%;max-height:calc(100dvh - 48px);overflow:auto;box-sizing:border-box;box-shadow:0 24px 80px #0005;";
+    const progress = document.createElement("p");
+    progress.style.cssText = "margin:0 0 10px;color:#52677f;font-size:12px;font-weight:700;letter-spacing:.06em;";
+    progress.setAttribute("aria-live", "polite");
+    const title = document.createElement("h2");
+    title.id = uid + "_title";
+    title.style.cssText = "font-size:23px;line-height:1.3;margin:0 0 12px;";
+    const body = document.createElement("p");
+    body.id = uid + "_body";
+    body.style.cssText = "margin:0;white-space:pre-line;font-size:15px;line-height:1.7;";
+    const context = document.createElement("p");
+    context.setAttribute("role", "status");
+    context.style.cssText = "color:#596d80;font-size:12px;line-height:1.5;";
+    const actions = document.createElement("div");
+    actions.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;margin-top:20px;";
+    function button(label, primary = false) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      b.style.cssText = "font:600 14px system-ui;padding:11px 18px;border-radius:9px;cursor:pointer;border:1px solid #ccd8e5;background:" + (primary ? "#183dba;color:#fff;" : "#fff;color:#172033;");
+      return b;
+    }
+    const dismiss = button("Close tour");
+    const previous = button("Back");
+    const next = button("Next", true);
+    actions.append(dismiss, previous, next);
+    panel.append(progress, title, body, context, actions);
+    const ring = document.createElement("div");
+    ring.setAttribute("aria-hidden", "true");
+    ring.style.cssText = "position:fixed;border:3px solid #75e9c5;border-radius:8px;box-shadow:0 0 0 4px #75e9c533;pointer-events:none;box-sizing:border-box;";
+    backdrop.append(ring, panel);
+    document.body.append(backdrop);
+    let target = null;
+    function positionRing() {
+      if (!target?.isConnected) {
+        ring.hidden = true;
+        return;
+      }
+      const r = target.getBoundingClientRect();
+      ring.hidden = r.width === 0 || r.height === 0;
+      Object.assign(ring.style, { left: r.left - 5 + "px", top: r.top - 5 + "px", width: r.width + 10 + "px", height: r.height + 10 + "px" });
+    }
+    function render() {
+      const step = steps[index];
+      progress.textContent = "STEP " + (index + 1) + " OF " + steps.length;
+      title.textContent = step.title;
+      body.textContent = step.copy;
+      previous.disabled = index === 0;
+      previous.style.opacity = index === 0 ? ".45" : "1";
+      next.textContent = index === steps.length - 1 ? "Finish tour" : "Next";
+      target = null;
+      try {
+        if (step.selector) target = document.querySelector(step.selector);
+        else if (step.targetElementId) target = Array.from(document.querySelectorAll("[data-sh-id]")).find((e) => e.getAttribute("data-sh-id") === step.targetElementId) ?? null;
+      } catch {
+      }
+      context.textContent = (step.selector || step.targetElementId) && !target ? "This target is not on the current page. You can continue or return when it is available." : "";
+      target?.scrollIntoView?.({ block: "center", behavior: "instant" });
+      positionRing();
+      next.focus();
+    }
+    function close(completed = false) {
+      if (closed) return;
+      closed = true;
+      document.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("resize", positionRing);
+      window.removeEventListener("scroll", positionRing, true);
+      activeTours.delete(cancel);
+      backdrop.remove();
+      if (priorFocus?.isConnected) priorFocus.focus();
+      try {
+        if (completed) options.onFinish?.();
+        else options.onDismiss?.();
+      } catch {
+      }
+    }
+    const cancel = () => close(false);
+    function forward() {
+      if (closed) return;
+      if (index === steps.length - 1) close(true);
+      else {
+        index++;
+        render();
+      }
+    }
+    function back() {
+      if (!closed && index > 0) {
+        index--;
+        render();
+      }
+    }
+    function onKey(e) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        cancel();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const buttons = [dismiss, previous, next].filter((b) => !b.disabled);
+      const first = buttons[0], last = buttons[buttons.length - 1];
+      if (e.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (document.activeElement === last || !panel.contains(document.activeElement))) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+    dismiss.addEventListener("click", cancel);
+    previous.addEventListener("click", back);
+    next.addEventListener("click", forward);
+    document.addEventListener("keydown", onKey, true);
+    window.addEventListener("resize", positionRing);
+    window.addEventListener("scroll", positionRing, true);
+    activeTours.add(cancel);
+    render();
+    return { next: forward, back, close: cancel, get step() {
+      return index;
+    } };
+  }
+
   // src/sdk/renderers.ts
   var ROOT_ID = "__sh_root__";
   var FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
@@ -361,6 +522,30 @@ var ClarusHeal = (() => {
   };
   var REDUCED = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var shown = /* @__PURE__ */ new Set();
+  var pending = /* @__PURE__ */ new Map();
+  var detachments = /* @__PURE__ */ new Set();
+  function later(fn, ms) {
+    const id = window.setTimeout(() => {
+      pending.delete(id);
+      fn();
+    }, ms);
+    pending.set(id, fn);
+    return id;
+  }
+  function resetRenderers() {
+    closeTours();
+    for (const [id, finish] of pending) {
+      window.clearTimeout(id);
+      finish();
+    }
+    pending.clear();
+    for (const detach of [...detachments]) detach();
+    detachments.clear();
+    document.getElementById(ROOT_ID)?.remove();
+    document.getElementById("__sh_styles__")?.remove();
+    shown.clear();
+    outcomeCallback = null;
+  }
   var outcomeCallback = null;
   function setOutcomeCallback(cb) {
     outcomeCallback = cb;
@@ -383,6 +568,7 @@ var ClarusHeal = (() => {
         zIndex: String(Z.spotlight)
       });
       const style = document.createElement("style");
+      style.id = "__sh_styles__";
       style.textContent = `
       @keyframes __sh_pulse__ {
         0%   { box-shadow: 0 0 0 0 rgba(59,130,246,.55), 0 0 0 0 rgba(59,130,246,.4); }
@@ -406,15 +592,20 @@ var ClarusHeal = (() => {
     shown.add(d.id);
     reportOutcome(outcomeId, "shown");
     const target = d.targetElementId ? findElement(d.targetElementId) : null;
-    if (target) {
+    if (target && d.type !== "TOUR") {
       const handler = () => {
         reportOutcome(outcomeId, "success");
         target.removeEventListener("click", handler, true);
       };
+      const detach = () => {
+        target.removeEventListener("click", handler, true);
+        detachments.delete(detach);
+      };
+      detachments.add(detach);
       target.addEventListener("click", handler, { capture: true, once: true });
-      window.setTimeout(() => target.removeEventListener("click", handler, true), 3e4);
+      later(detach, 3e4);
     }
-    const ttl = typeof d.autoDismissMs === "number" && d.autoDismissMs > 0 ? d.autoDismissMs : 8e3;
+    const ttl = typeof d.autoDismissMs === "number" && d.autoDismissMs >= 0 ? d.autoDismissMs : 8e3;
     switch (d.type) {
       case "OVERLAY":
         return renderOverlay(d, ttl);
@@ -445,7 +636,7 @@ var ClarusHeal = (() => {
     }
   }
   function findElement(id) {
-    return document.querySelector(`[data-sh-id="${id}"]`);
+    return Array.from(document.querySelectorAll("[data-sh-id]")).find((el) => el.getAttribute("data-sh-id") === id) ?? null;
   }
   function makeDismissBtn(onDismiss, interventionId) {
     const b = document.createElement("button");
@@ -470,7 +661,7 @@ var ClarusHeal = (() => {
   }
   function autoCleanup(el, ms, onRemove) {
     if (ms <= 0) return;
-    window.setTimeout(() => {
+    later(() => {
       onRemove?.();
       el.remove();
     }, ms);
@@ -488,7 +679,12 @@ var ClarusHeal = (() => {
       document.removeEventListener("keydown", onKey, true);
     };
     document.addEventListener("keydown", onKey, true);
-    return () => document.removeEventListener("keydown", onKey, true);
+    const detach = () => {
+      document.removeEventListener("keydown", onKey, true);
+      detachments.delete(detach);
+    };
+    detachments.add(detach);
+    return detach;
   }
   function removeWith(el, detach) {
     detach();
@@ -513,10 +709,13 @@ var ClarusHeal = (() => {
       }
     };
     document.addEventListener("keydown", onKey, true);
-    return () => {
+    const detach = () => {
       document.removeEventListener("keydown", onKey, true);
       previouslyFocused?.focus?.();
+      detachments.delete(detach);
     };
+    detachments.add(detach);
+    return detach;
   }
   function flashRing(target, kind) {
     const rect = target.getBoundingClientRect();
@@ -607,7 +806,7 @@ var ClarusHeal = (() => {
     row.appendChild(dismiss);
     card.appendChild(row);
     root().appendChild(card);
-    const adjustedTtl = conf >= 0.85 ? ttl : conf >= 0.5 ? Math.max(4e3, ttl * 0.75) : Math.max(3e3, ttl * 0.5);
+    const adjustedTtl = ttl === 0 ? 0 : conf >= 0.85 ? ttl : conf >= 0.5 ? Math.max(4e3, ttl * 0.75) : Math.max(3e3, ttl * 0.5);
     autoCleanup(card, adjustedTtl, detachEsc);
   }
   function renderHighlight(target, d, ttl) {
@@ -830,14 +1029,26 @@ var ClarusHeal = (() => {
     autoCleanup(hint, ttl);
   }
   function renderTour(d, outcomeId = d.id) {
-    renderModal({ ...d, type: "MODAL" }, outcomeId);
+    let steps = [{ title: d.title || "A little guidance", copy: d.copy, targetElementId: d.targetElementId ?? void 0 }];
+    if (typeof d.options?.steps === "string") {
+      try {
+        if (d.options.steps.length > 1e5) return;
+        steps = JSON.parse(d.options.steps);
+      } catch {
+        return;
+      }
+    }
+    try {
+      startTour({ steps, onFinish: () => reportOutcome(outcomeId, "success"), onDismiss: () => reportOutcome(outcomeId, "dismissed") });
+    } catch {
+    }
   }
   function renderIconFlash(target, ttl) {
     if (!target) return;
     const original = target.style.transition;
     target.style.transition = "background 200ms";
     target.classList.add("__sh_flash__");
-    window.setTimeout(() => {
+    later(() => {
       target.classList.remove("__sh_flash__");
       target.style.transition = original;
     }, ttl > 0 ? ttl : 2400);
@@ -872,7 +1083,7 @@ var ClarusHeal = (() => {
         arrow.style.transform = up ? "translateY(0)" : "translateY(-6px)";
         up = !up;
       }, 600);
-      window.setTimeout(() => window.clearInterval(interval), ttl > 0 ? ttl : 6e3);
+      later(() => window.clearInterval(interval), ttl > 0 ? ttl : 6e3);
     }
     root().appendChild(arrow);
     if (d.copy) renderOverlay(d, ttl);
@@ -892,7 +1103,7 @@ var ClarusHeal = (() => {
     region.style.left = "-9999px";
     region.textContent = stripHtml(d.copy);
     root().appendChild(region);
-    window.setTimeout(() => region.remove(), 4e3);
+    later(() => region.remove(), 4e3);
   }
   function decodeHtml(s) {
     return s.replace(/&rsquo;/g, "\u2019").replace(/&lsquo;/g, "\u2018").replace(/&ldquo;/g, "\u201C").replace(/&rdquo;/g, "\u201D").replace(/&hellip;/g, "\u2026").replace(/&amp;/g, "&").replace(/&nbsp;/g, "\xA0");
@@ -903,6 +1114,7 @@ var ClarusHeal = (() => {
 
   // src/sdk/index.ts
   var initialized = false;
+  var cleanup = null;
   var _state = null;
   function track(name, props) {
     if (!_state) {
@@ -917,7 +1129,10 @@ var ClarusHeal = (() => {
   }
   function identify(userId) {
     if (!_state) return;
-    void hashUserIdentifier(userId).then((hash) => _state?.setUserIdHash(hash));
+    const current = _state;
+    void hashUserIdentifier(userId).then((hash) => {
+      if (_state === current) current.setUserIdHash(hash);
+    }).catch(() => void 0);
   }
   async function hashUserIdentifier(userId) {
     const data = new TextEncoder().encode(userId);
@@ -930,14 +1145,61 @@ var ClarusHeal = (() => {
   function initSelfHealing(opts) {
     if (typeof window === "undefined" || typeof document === "undefined") return;
     if (initialized) return;
+    if (!opts.orgId?.trim()) return;
+    if (opts.flushIntervalMs !== void 0 && (!Number.isFinite(opts.flushIntervalMs) || opts.flushIntervalMs <= 0)) return;
     initialized = true;
     try {
       initInner(opts);
     } catch (err) {
       console.warn("[clarus-heal] init failed:", err);
+      destroySelfHealing();
     }
   }
+  function destroySelfHealing() {
+    cleanup?.();
+    cleanup = null;
+    _state = null;
+    initialized = false;
+    if (typeof document !== "undefined") resetRenderers();
+  }
+  async function flush() {
+    return _state ? _state.flush() : { sent: 0 };
+  }
   function initInner(opts) {
+    let active = true;
+    const controller = new window.AbortController();
+    const timers = /* @__PURE__ */ new Set();
+    const intervals = /* @__PURE__ */ new Set();
+    const restorers = [];
+    cleanup = () => {
+      active = false;
+      controller.abort();
+      for (const id of timers) window.clearTimeout(id);
+      for (const id of intervals) window.clearInterval(id);
+      for (const restore of restorers) restore();
+      setOutcomeCallback(null);
+    };
+    const doc = { addEventListener: ((type, listener, options) => {
+      document.addEventListener(type, listener, { ...typeof options === "boolean" ? { capture: options } : options, signal: controller.signal });
+    }) };
+    const win = { addEventListener: ((type, listener, options) => {
+      window.addEventListener(type, listener, { ...typeof options === "boolean" ? { capture: options } : options, signal: controller.signal });
+    }) };
+    function after(fn, ms) {
+      const id = window.setTimeout(() => {
+        timers.delete(id);
+        if (active) fn();
+      }, ms);
+      timers.add(id);
+      return id;
+    }
+    function every(fn, ms) {
+      const id = window.setInterval(() => {
+        if (active) fn();
+      }, ms);
+      intervals.add(id);
+      return id;
+    }
     const endpoint = opts.endpoint ?? "/api/events";
     const flushIntervalMs = opts.flushIntervalMs ?? 4e3;
     const sessionId = ensureSessionId();
@@ -949,9 +1211,10 @@ var ClarusHeal = (() => {
       buffer,
       0,
       (interventions) => {
-        for (const interv of interventions) renderIntervention(interv);
+        if (active) for (const interv of interventions) renderIntervention(interv);
       },
-      opts.ingestKey
+      opts.ingestKey,
+      controller.signal
     );
     const rage = new RageClickDetector();
     const pageMountedAt = Date.now();
@@ -1068,7 +1331,7 @@ var ClarusHeal = (() => {
       return run;
     }
     async function emitNow(eventType, el, meta) {
-      if (disabled.has(eventType)) return null;
+      if (!active || disabled.has(eventType)) return null;
       const isOutcome = eventType === "CUSTOM" && typeof meta?.kind === "string" && meta.kind.startsWith("intervention_");
       if (!isOutcome && !shouldSample(eventType, el)) return null;
       let elementId = null;
@@ -1092,10 +1355,15 @@ var ClarusHeal = (() => {
         page: snapshotPageContext(),
         element: elementContextFor(el)
       };
+      if (!active) return null;
       buffer.push(event);
+      try {
+        opts.onEvent?.(JSON.parse(JSON.stringify(event)));
+      } catch {
+      }
       return event;
     }
-    document.addEventListener(
+    doc.addEventListener(
       "click",
       (e) => {
         const target = e.target;
@@ -1111,6 +1379,12 @@ var ClarusHeal = (() => {
         void emit("CLICK", interactive, meta).then((ev) => {
           if (!ev) return;
           const result = rage.observe(ev.elementId);
+          if (result.detected) {
+            try {
+              opts.onLocalStruggle?.(result);
+            } catch {
+            }
+          }
           if (result.detected && opts.enableLocalDemoOverlays) {
             renderIntervention({
               id: `local_${Date.now()}`,
@@ -1125,7 +1399,7 @@ var ClarusHeal = (() => {
       },
       { capture: true, passive: true }
     );
-    document.addEventListener(
+    doc.addEventListener(
       "submit",
       (e) => {
         const form = e.target;
@@ -1142,13 +1416,13 @@ var ClarusHeal = (() => {
     );
     let inputDebounce;
     const inputElementMeta = /* @__PURE__ */ new Map();
-    document.addEventListener(
+    doc.addEventListener(
       "input",
       (e) => {
         const target = e.target;
         if (!target) return;
         window.clearTimeout(inputDebounce);
-        inputDebounce = window.setTimeout(() => {
+        inputDebounce = after(() => {
           const value = scrubText(target.value ?? "", opts.piiPatterns);
           const length = value.length;
           const prev = inputElementMeta.get(target)?.lastLength ?? 0;
@@ -1158,7 +1432,7 @@ var ClarusHeal = (() => {
       },
       { capture: true, passive: true }
     );
-    document.addEventListener(
+    doc.addEventListener(
       "focus",
       (e) => {
         const target = e.target;
@@ -1167,7 +1441,7 @@ var ClarusHeal = (() => {
       },
       { capture: true, passive: true }
     );
-    document.addEventListener(
+    doc.addEventListener(
       "blur",
       (e) => {
         const target = e.target;
@@ -1176,13 +1450,13 @@ var ClarusHeal = (() => {
       },
       { capture: true, passive: true }
     );
-    document.addEventListener("paste", (e) => {
+    doc.addEventListener("paste", (e) => {
       void emit("PASTE", e.target);
     }, { capture: true, passive: true });
-    document.addEventListener("copy", (e) => {
+    doc.addEventListener("copy", (e) => {
       void emit("COPY", e.target);
     }, { capture: true, passive: true });
-    document.addEventListener(
+    doc.addEventListener(
       "keydown",
       (e) => {
         if (e.key !== "Tab" && e.key !== "Escape" && e.key !== "Enter") return;
@@ -1192,7 +1466,7 @@ var ClarusHeal = (() => {
     );
     let hoverTimer;
     let lastHoverEl = null;
-    document.addEventListener(
+    doc.addEventListener(
       "mouseover",
       (e) => {
         const target = e.target;
@@ -1201,7 +1475,7 @@ var ClarusHeal = (() => {
         if (!interactive || interactive === lastHoverEl) return;
         lastHoverEl = interactive;
         window.clearTimeout(hoverTimer);
-        hoverTimer = window.setTimeout(() => {
+        hoverTimer = after(() => {
           const meta = {};
           if (interactive.hasAttribute("title")) meta.tooltip = true;
           pendingHoverEl = interactive;
@@ -1212,7 +1486,7 @@ var ClarusHeal = (() => {
     );
     let scrollLastTs = 0;
     let scrollLastY = window.scrollY;
-    window.addEventListener(
+    win.addEventListener(
       "scroll",
       () => {
         const now = Date.now();
@@ -1248,7 +1522,7 @@ var ClarusHeal = (() => {
       "FOCUS",
       "HOVER"
     ]);
-    document.addEventListener(
+    doc.addEventListener(
       "mousemove",
       (e) => {
         pendingHoverEl = e.target;
@@ -1264,7 +1538,7 @@ var ClarusHeal = (() => {
       }
       if (eventType === "HOVER" && !lastStrongInteractEl && pendingHoverEl) lastInteractEl = pendingHoverEl;
     }
-    window.setInterval(() => {
+    every(() => {
       const quietMs = Date.now() - lastInteractTs;
       const stretchMs = reportedThisStretch ? lastReportedMs + quietMs : quietMs;
       if (stretchMs >= DWELL_REPORT_MS) {
@@ -1275,29 +1549,29 @@ var ClarusHeal = (() => {
         reportedThisStretch = true;
       }
     }, 1e3);
-    window.addEventListener("error", (e) => {
+    win.addEventListener("error", (e) => {
       void emit("JS_ERROR", null, {
         message: e.message ?? "unknown",
         filename: e.filename ?? "",
         lineno: e.lineno ?? 0
       });
     });
-    window.addEventListener("unhandledrejection", (e) => {
+    win.addEventListener("unhandledrejection", (e) => {
       void emit("JS_ERROR", null, {
         message: String(e.reason ?? "unhandled rejection")
       });
     });
-    document.addEventListener("clarus-heal:validation", ((e) => {
+    doc.addEventListener("clarus-heal:validation", ((e) => {
       const detail = e.detail ?? {};
       void emit("VALIDATION_ERROR", detail.element ?? null, {
         kind: detail.kind ?? "format",
         field: detail.field ?? ""
       });
     }));
-    window.addEventListener("blur", () => {
+    win.addEventListener("blur", () => {
       void emit("BLUR", null, { target: "window" });
     });
-    window.addEventListener("focus", () => {
+    win.addEventListener("focus", () => {
       void emit("FOCUS", null, { target: "window" });
     });
     const navigation = new NavigationTracker(location);
@@ -1315,34 +1589,46 @@ var ClarusHeal = (() => {
     const navigationApi = window.navigation;
     navigationApi?.addEventListener("navigate", ((e) => {
       lastNavigationType = e.navigationType ?? null;
-    }));
-    window.addEventListener("popstate", () => {
+    }), { signal: controller.signal });
+    win.addEventListener("popstate", () => {
       const trigger = classifyPopstate(lastNavigationType);
       lastNavigationType = null;
       navigated(trigger);
     });
-    window.addEventListener("hashchange", () => navigated("hashchange"));
-    const _pushState = history.pushState.bind(history);
+    win.addEventListener("hashchange", () => navigated("hashchange"));
+    const originalPush = history.pushState;
+    const _pushState = originalPush.bind(history);
     history.pushState = function(data, unused, url) {
       _pushState(data, unused, url);
       navigated("pushstate");
     };
-    const _replaceState = history.replaceState.bind(history);
+    const patchedPush = history.pushState;
+    const originalReplace = history.replaceState;
+    const _replaceState = originalReplace.bind(history);
     history.replaceState = function(data, unused, url) {
       _replaceState(data, unused, url);
       navigated("replacestate");
     };
+    const patchedReplace = history.replaceState;
+    restorers.push(() => {
+      if (history.pushState === patchedPush) history.pushState = originalPush;
+      if (history.replaceState === patchedReplace) history.replaceState = originalReplace;
+    });
     _state = {
       emit,
+      flush: async () => {
+        await emitChain;
+        return active ? transport.flush() : { sent: 0 };
+      },
       setUserIdHash: (h) => {
         userIdHash = h;
       }
     };
-    window.setInterval(() => void transport.flush(), flushIntervalMs);
-    window.addEventListener("beforeunload", () => {
+    every(() => void transport.flush(), flushIntervalMs);
+    win.addEventListener("beforeunload", () => {
       void transport.flush();
     });
-    document.addEventListener("visibilitychange", () => {
+    doc.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") void transport.flush();
     });
   }
@@ -1376,14 +1662,6 @@ var ClarusHeal = (() => {
       endpoint,
       flushIntervalMs: Number.isFinite(flushIntervalMs) ? flushIntervalMs : void 0
     };
-  }
-  function autoInitFromScriptTag() {
-    const opts = readAutoInitOptions();
-    if (opts) initSelfHealing(opts);
-  }
-  try {
-    autoInitFromScriptTag();
-  } catch {
   }
   function ensureSessionId() {
     const KEY = "__sh_sid_v1__";
@@ -1424,5 +1702,12 @@ var ClarusHeal = (() => {
     }
     return true;
   }
-  return __toCommonJS(index_exports);
+
+  // src/sdk/script-entry.ts
+  try {
+    const options = readAutoInitOptions();
+    if (options) initSelfHealing(options);
+  } catch {
+  }
+  return __toCommonJS(script_entry_exports);
 })();

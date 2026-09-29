@@ -4,15 +4,15 @@ Captured with **headless Chromium driving the built SDK bundle** — not jsdom.
 
 | Fact | Value |
 | --- | --- |
-| Source (at capture) | `SDK bundles are byte-identical to HEAD f892ef54d02febf60dc9b1c550be3450ee98faf5; bundle inputs clean at capture; working tree DIRTY at capture (2 path(s) uncommitted, e.g. tests/sdk-dwell-attribution.test.ts, vitest.config.ts) - the capture uses the measured bundle bytes and records working-tree edits` |
-| HEAD at capture | `f892ef54d02febf60dc9b1c550be3450ee98faf5` |
-| SDK bundle bytes vs HEAD | match - `public/sdk.js` and `public/sdk.min.js` are byte-identical to the blobs committed at `f892ef54d02febf60dc9b1c550be3450ee98faf5` (compared via `git show HEAD:<path>` sha256, not via `git status`) |
-| Bundle inputs at capture | clean - `src/sdk/index.ts` and both bundles are unmodified in the working tree |
-| Working tree at capture | **DIRTY** - 2 uncommitted path(s): `tests/sdk-dwell-attribution.test.ts`, `vitest.config.ts`. This capture records the measured SDK bundle bytes above and uncommitted paths relative to `f892ef54d02febf60dc9b1c550be3450ee98faf5` |
+| Source (at capture) | `SDK bundles DIFFER from HEAD dbe4d514a1a53e8eba1615f6c60487d62bf5d6df; bundle inputs dirty at capture (public/sdk.js, public/sdk.min.js, src/sdk/index.ts); working tree DIRTY at capture (4 path(s) uncommitted, e.g. public/demo/demo.js, public/sdk.js, public/sdk.min.js, src/sdk/index.ts) - the capture uses the measured bundle bytes and records working-tree edits` |
+| HEAD at capture | `dbe4d514a1a53e8eba1615f6c60487d62bf5d6df` |
+| SDK bundle bytes vs HEAD | **DIFFER** - the executed bundle is not the blob committed at `dbe4d514a1a53e8eba1615f6c60487d62bf5d6df` |
+| Bundle inputs at capture | **dirty** - uncommitted edits to `public/sdk.js`, `public/sdk.min.js`, `src/sdk/index.ts` |
+| Working tree at capture | **DIRTY** - 4 uncommitted path(s): `public/demo/demo.js`, `public/sdk.js`, `public/sdk.min.js`, `src/sdk/index.ts`. This capture records the measured SDK bundle bytes above and uncommitted paths relative to `dbe4d514a1a53e8eba1615f6c60487d62bf5d6df` |
 | Chromium | `Chromium 154.0.8037.57 built on Debian GNU/Linux 12 (bookworm)` (`/usr/bin/chromium`) |
 | Node | `v22.23.2` |
-| `public/sdk.js` sha256 | `27e973f89e3b1387f91c4c0a4d8031c199ceb1f32f9866cfccd61e2ce7c97728` |
-| `public/sdk.min.js` sha256 | `6dbd4139d426e14114ee24c7a06ee7f0c861401f7f36639090dbde9794af49a6` |
+| `public/sdk.js` sha256 | `f15680ceff8724ffe9d9b79bc629fe30e33f0758ac90fcaa527560cb86d9717c` |
+| `public/sdk.min.js` sha256 | `837a2e384f2f1af6ee10bee021c23e40af09024b43c0317a1b303a14fc793c1e` |
 
 Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
 
@@ -20,18 +20,24 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
 
 ```json
 {
-  "headAtCapture": "f892ef54d02febf60dc9b1c550be3450ee98faf5",
+  "headAtCapture": "dbe4d514a1a53e8eba1615f6c60487d62bf5d6df",
   "workingTreeDirtyAtCapture": true,
   "dirtyPathsAtCapture": [
-    "tests/sdk-dwell-attribution.test.ts",
-    "vitest.config.ts"
+    "public/demo/demo.js",
+    "public/sdk.js",
+    "public/sdk.min.js",
+    "src/sdk/index.ts"
   ],
-  "bundleSourceDirtyAtCapture": false,
-  "bundleDirtyPathsAtCapture": [],
-  "sdkBundleMatchesHead": true,
-  "sdkMinBundleMatchesHead": true,
-  "bundleMatchesHead": true,
-  "sourceLabel": "SDK bundles are byte-identical to HEAD f892ef54d02febf60dc9b1c550be3450ee98faf5; bundle inputs clean at capture; working tree DIRTY at capture (2 path(s) uncommitted, e.g. tests/sdk-dwell-attribution.test.ts, vitest.config.ts) - the capture uses the measured bundle bytes and records working-tree edits"
+  "bundleSourceDirtyAtCapture": true,
+  "bundleDirtyPathsAtCapture": [
+    "public/sdk.js",
+    "public/sdk.min.js",
+    "src/sdk/index.ts"
+  ],
+  "sdkBundleMatchesHead": false,
+  "sdkMinBundleMatchesHead": false,
+  "bundleMatchesHead": false,
+  "sourceLabel": "SDK bundles DIFFER from HEAD dbe4d514a1a53e8eba1615f6c60487d62bf5d6df; bundle inputs dirty at capture (public/sdk.js, public/sdk.min.js, src/sdk/index.ts); working tree DIRTY at capture (4 path(s) uncommitted, e.g. public/demo/demo.js, public/sdk.js, public/sdk.min.js, src/sdk/index.ts) - the capture uses the measured bundle bytes and records working-tree edits"
 }
 ```
 
@@ -92,13 +98,39 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
   "withValidity": [
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790623151347_dlevau8o_1790623151358_90y1j4he",
-      "sessionId": "sh_sess_1790623151347_dlevau8o",
+      "idempotencyKey": "sh_sess_1790663757473_iwx28r5h_1790663757481_p5fknjki",
+      "sessionId": "sh_sess_1790663757473_iwx28r5h",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "FOCUS",
-      "ts": "2026-09-28T19:19:11.358Z",
+      "ts": "2026-09-29T06:35:57.481Z",
+      "page": {
+        "viewportW": 1280,
+        "viewportH": 720,
+        "formFactor": "desktop",
+        "ageMs": 7
+      },
+      "element": {
+        "touched": true,
+        "dirty": false,
+        "valueLength": 0,
+        "validity": "customError",
+        "validationMessage": "That is a card number, not a VAT ID.",
+        "formId": "(unnamed-form)",
+        "formValid": false
+      }
+    },
+    {
+      "schemaVersion": 3,
+      "idempotencyKey": "sh_sess_1790663757473_iwx28r5h_1790663757483_axngrhr4",
+      "sessionId": "sh_sess_1790663757473_iwx28r5h",
+      "userIdHash": null,
+      "elementId": null,
+      "route": "blank",
+      "eventType": "CLICK",
+      "ts": "2026-09-29T06:35:57.483Z",
+      "meta": {},
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
@@ -117,44 +149,18 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790623151347_dlevau8o_1790623151361_edvluo10",
-      "sessionId": "sh_sess_1790623151347_dlevau8o",
-      "userIdHash": null,
-      "elementId": null,
-      "route": "blank",
-      "eventType": "CLICK",
-      "ts": "2026-09-28T19:19:11.361Z",
-      "meta": {},
-      "page": {
-        "viewportW": 1280,
-        "viewportH": 720,
-        "formFactor": "desktop",
-        "ageMs": 13
-      },
-      "element": {
-        "touched": true,
-        "dirty": false,
-        "valueLength": 0,
-        "validity": "customError",
-        "validationMessage": "That is a card number, not a VAT ID.",
-        "formId": "(unnamed-form)",
-        "formValid": false
-      }
-    },
-    {
-      "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790623151347_dlevau8o_1790623151362_w1roq1bq",
-      "sessionId": "sh_sess_1790623151347_dlevau8o",
+      "idempotencyKey": "sh_sess_1790663757473_iwx28r5h_1790663757484_bv41all7",
+      "sessionId": "sh_sess_1790663757473_iwx28r5h",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "BLUR",
-      "ts": "2026-09-28T19:19:11.362Z",
+      "ts": "2026-09-29T06:35:57.484Z",
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 14
+        "ageMs": 10
       },
       "element": {
         "touched": true,
@@ -168,18 +174,18 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790623151347_dlevau8o_1790623151362_s3fr7c7y",
-      "sessionId": "sh_sess_1790623151347_dlevau8o",
+      "idempotencyKey": "sh_sess_1790663757473_iwx28r5h_1790663757485_ro1dozh1",
+      "sessionId": "sh_sess_1790663757473_iwx28r5h",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "FOCUS",
-      "ts": "2026-09-28T19:19:11.362Z",
+      "ts": "2026-09-29T06:35:57.485Z",
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 14
+        "ageMs": 11
       },
       "element": {
         "touched": true,
@@ -192,19 +198,19 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790623151347_dlevau8o_1790623151363_96kdacrh",
-      "sessionId": "sh_sess_1790623151347_dlevau8o",
+      "idempotencyKey": "sh_sess_1790663757473_iwx28r5h_1790663757485_3xwthyv6",
+      "sessionId": "sh_sess_1790663757473_iwx28r5h",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "CLICK",
-      "ts": "2026-09-28T19:19:11.363Z",
+      "ts": "2026-09-29T06:35:57.485Z",
       "meta": {},
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 15
+        "ageMs": 11
       },
       "element": {
         "touched": true,

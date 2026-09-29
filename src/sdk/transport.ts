@@ -30,9 +30,11 @@ export class Transport {
     private readonly clockOffsetMs: number = 0,
     private readonly onInterventions?: InterventionHandler,
     private readonly ingestKey?: string,
+    private readonly signal?: AbortSignal,
   ) {}
 
   async flush(): Promise<FlushResult> {
+    if (this.signal?.aborted) return { sent: 0 }
     const events = this.buffer.drain()
     if (events.length === 0) return { sent: 0 }
 
@@ -59,7 +61,9 @@ export class Transport {
         headers,
         body: JSON.stringify(body),
         keepalive: true,
+        signal: this.signal,
       })
+      if (this.signal?.aborted) return { sent: 0 }
       if (!res.ok) {
         for (const e of events) this.buffer.push(e)
         return { sent: 0, error: `HTTP ${res.status}` }
@@ -70,6 +74,7 @@ export class Transport {
       } catch {
         // malformed response - still consider events sent
       }
+      if (this.signal?.aborted) return { sent: 0 }
       const interventions = response?.interventions ?? []
       if (interventions.length > 0 && this.onInterventions) {
         try {
@@ -80,8 +85,8 @@ export class Transport {
       }
       return { sent: events.length, interventions }
     } catch (err) {
-      for (const e of events) this.buffer.push(e)
-      return { sent: 0, error: (err as Error).message }
+      if (!this.signal?.aborted) for (const e of events) this.buffer.push(e)
+      return { sent: 0, error: this.signal?.aborted ? 'Stopped' : (err as Error).message }
     }
   }
 }

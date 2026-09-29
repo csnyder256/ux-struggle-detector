@@ -16,6 +16,8 @@ import { hashElementId, type ElementId, isElementId } from '../lib/types/ui-map'
 import { routeFromLocation } from './route'
 
 const MAX_DEPTH = 20
+// Refresh SDK-generated bindings when a router reuses the same node.
+const runtimeBindings = new WeakMap<Element, { id: ElementId; route: string; orgId: string }>()
 
 /**
  * Sibling-index path from this element up to (but excluding) the body.
@@ -46,11 +48,16 @@ export async function resolveElementId(
   el: Element,
 ): Promise<ElementId> {
   const attr = el.getAttribute('data-sh-id')
-  if (attr && isElementId(attr)) return attr
+  const route = routeFromLocation(window.location)
+  const prior = runtimeBindings.get(el)
+  if (attr && isElementId(attr) && (!prior || prior.id !== attr || (prior.route === route && prior.orgId === orgId))) return attr
 
   // Route, not pathname: in a hash-routed app every screen shares one
   // pathname, and same-position elements on different screens would collide.
-  const filePath = routeFromLocation(window.location)
   const nodeDescriptor = describeNode(el)
-  return hashElementId({ orgId, filePath, nodeDescriptor })
+  const id = await hashElementId({ orgId, filePath: route, nodeDescriptor })
+  // Let dispatched interventions find the target of a runtime-derived ID.
+  el.setAttribute('data-sh-id', id)
+  runtimeBindings.set(el, { id, route, orgId })
+  return id
 }

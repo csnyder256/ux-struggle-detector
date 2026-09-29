@@ -1,0 +1,15 @@
+import { cp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');process.chdir(root);
+const out='dist-pages';await rm(out,{recursive:true,force:true});await mkdir(out,{recursive:true});
+await cp('docs/index.html',out+'/index.html');
+await cp('public/demo',out+'/demo',{recursive:true});
+for(const f of ['sdk.js','sdk.min.js'])await cp('public/'+f,out+'/'+f);
+const source_sha=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
+const version=(await readFile('VERSION','utf8')).trim();
+const sha256=b=>createHash('sha256').update(b).digest('hex');
+await writeFile(out+'/deployment.json',JSON.stringify({source_sha,version,sdk_sha256:sha256(await readFile('public/sdk.min.js')),demo_sha256:sha256(await readFile('public/demo/demo.js')),mode:'controlled_local_demo'},null,2)+'\n');
+console.log('Pages prepared',version,source_sha);

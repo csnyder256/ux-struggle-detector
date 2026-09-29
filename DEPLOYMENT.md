@@ -2,7 +2,7 @@
 
 ## Docker Compose on a trusted server or local machine
 
-Extract the `v0.2.0` deployment bundle from [Releases](https://github.com/csnyder256/ux-struggle-detector/releases), verify SHA-256 against `checksums.txt`, and copy `deploy/.env.example` to `.env`. Generate a different random value for each required secret (`openssl rand -hex 32` for the database password; `openssl rand -base64 32` for each encryption/auth secret). Set the SMTP fields to enable magic-link sign-in. The environment file remains private and is excluded from image builds.
+Extract the `v0.3.0` deployment bundle from [Releases](https://github.com/csnyder256/ux-struggle-detector/releases), verify SHA-256 against `checksums.txt`, and copy `deploy/.env.example` to `.env`. Generate a different random value for each required secret (`openssl rand -hex 32` for the database password; `openssl rand -base64 32` for each encryption/auth secret). Set the SMTP fields to enable magic-link sign-in. The environment file remains private and is excluded from image builds.
 
 For a **new, empty database**:
 
@@ -18,11 +18,13 @@ Open <http://localhost:3000>. The app runs a production Next.js build as a non-r
 
 ## Vercel or a Node host
 
-The existing `vercel.json` supports Vercel; connect a managed PostgreSQL database and set private runtime environment variables. Initialize only a new database as above (or `pnpm exec prisma db push`). For a Node 22 host, install pnpm 10, run `pnpm install --frozen-lockfile`, `pnpm exec prisma generate`, both SDK build commands and `pnpm build`, then `pnpm start`. Install Chromium and its OS dependencies for crawler jobs (`pnpm exec playwright install --with-deps chromium`). Server and browser SDK belong to the same version.
+The existing `vercel.json` supports Vercel; connect a managed PostgreSQL database and set private runtime environment variables. Initialize only a new database as above (or `pnpm exec prisma db push`). For a Node 22 host, install pnpm 10, run `pnpm install --frozen-lockfile`, `pnpm exec prisma generate`, `pnpm sdk:build`, `pnpm sdk:build:min`, `pnpm sdk:package`, `pnpm demo:build` and `pnpm build`, then `pnpm start`. Install Chromium and its OS dependencies for crawler jobs (`pnpm exec playwright install --with-deps chromium`). Server and browser SDK belong to the same version.
 
 ## Browser SDK distribution
 
 Each release supplies `sdk.js` and `sdk.min.js` as direct downloads alongside the deployment bundles. Serve either from your own origin/CDN and configure its endpoint and site ingestion key as documented in GETTING_STARTED.md. These files do not contain tenant keys. Pin a release and retain the matching LICENSE; do not treat the portfolio Pages site as a running ingestion API.
+
+The release also provides an installable ESM/CommonJS `.tgz`, declarations, LICENSE and source/checksum provenance. See [SDK integration](SDK.md) for verified local-file installation, tours and teardown. The package has no runtime dependencies. The Pages lab is a local demonstration; use your own authenticated ingestion endpoint for production.
 
 ## Upgrade and rollback
 
