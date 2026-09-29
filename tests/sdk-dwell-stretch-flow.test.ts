@@ -60,12 +60,9 @@ beforeEach(() => {
 })
 
 /**
- * Advance the SDK's virtual clock until `pred` holds, or a generous wall-clock
- * budget is spent. It returns early the instant the condition is met, so the
- * large budget costs nothing on an idle box; it exists because under parallel
- * test load a single timer advance delivers fewer interval callbacks, and a
- * fixed iteration count turns "the machine was busy" into a false failure. The
- * test then depends on the SDK's observable behaviour, never on scheduling.
+ * Advance the SDK's virtual clock until `pred` holds or the virtual budget
+ * is spent. The browser timers and Date share that clock; asynchronous event
+ * capture may still settle between advances.
  */
 async function settleUntil(
   pred: () => boolean,
@@ -223,7 +220,16 @@ describe('SDK quiet-stretch identity survives ingest into baseline grouping', ()
     try {
       const cta = run.doc.getElementById('cta')!
       moveMouse(cta) // the last thing touched before going quiet
-      await settleUntil(() => dwellEvents(run.events).length >= 60)
+      // Wait for evidence that clears the detector's duration, not a report
+      // count. A stalled SDK must fail this condition explicitly.
+      const p95DwellMs = 30_000
+      const adaptedThreshold = Math.max(30_000, Math.ceil(p95DwellMs * 1.5))
+      const crossedThreshold = () => dwellEvents(run.events).some(
+        (e) => Number(e.meta?.ms ?? 0) >= adaptedThreshold,
+      )
+      expect(vi.getTimerCount()).toBeGreaterThan(0)
+      await settleUntil(crossedThreshold)
+      expect(crossedThreshold()).toBe(true)
       const accepted = dwellEvents(run.events).map(throughIngest)
       // One stretch, many heartbeats.
       expect(new Set(accepted.map((e) => e.meta?.stretch)).size).toBe(1)
@@ -232,8 +238,6 @@ describe('SDK quiet-stretch identity survives ingest into baseline grouping', ()
       expect(elementId).toBeTruthy()
 
       // Baseline p95 = 30s => detector raises the floor to max(30s, 45s) = 45s.
-      const p95DwellMs = 30_000
-      const adaptedThreshold = Math.max(30_000, Math.ceil(p95DwellMs * 1.5))
       const dets = detectStruggles(accepted, {
         baselines: new Map([[elementId, { p95DwellMs, sampleSize: 30 }]]),
       }).filter((d) => d.type === 'LONG_DWELL')
