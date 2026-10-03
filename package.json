@@ -21,7 +21,7 @@
     "demo:verify": "node scripts/verify-sdk-demo.cjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.128.0",
+    "@anthropic-ai/sdk": "^0.129.0",
     "@auth/prisma-adapter": "^2.11.3",
     "@babel/parser": "^7.29.9",
     "@babel/traverse": "^7.29.8",
@@ -30,14 +30,14 @@
     "@octokit/rest": "^22.0.1",
     "@octokit/webhooks": "^14.2.0",
     "@prisma/client": "^5.22.0",
-    "@tanstack/react-query": "^5.103.2",
+    "@tanstack/react-query": "^5.104.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "lucide-react": "^1.47.0",
+    "lucide-react": "^1.49.0",
     "next": "^15.5.26",
     "next-auth": "5.0.0-beta.32",
-    "nodemailer": "^10.0.10",
-    "openai": "^7.23.0",
+    "nodemailer": "^10.0.13",
+    "openai": "^7.25.0",
     "playwright": "^1.63.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -61,7 +61,7 @@
     "prisma": "^5.22.0",
     "tailwindcss": "^3.4.14",
     "typescript": "^5.6.3",
-    "vite": "^8.3.0",
-    "vitest": "^5.0.1"
+    "vite": "^8.3.1",
+    "vitest": "^5.0.3"
   }
 }
