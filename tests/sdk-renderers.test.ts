@@ -222,17 +222,41 @@ describe('anchored panels stay inside the viewport', () => {
     expect(right).toBeLessThanOrEqual(VIEWPORT.w - 8)
   })
 
-  it('keeps an INLINE_HINT on screen below an element at the bottom edge', () => {
+  it('keeps an INLINE_HINT on screen for an element at the bottom edge', () => {
     box(harness.element, { left: 40, top: VIEWPORT.h - 30, width: 120, height: 24 })
     render(intervention({ type: 'INLINE_HINT' }))
 
-    const hint = painted(harness.doc).find((el) => el !== rootEl(harness.doc) && el.textContent?.includes('finish this order') && el.style.borderRadius === '4px')
-    expect(hint, 'the inline hint rendered').toBeTruthy()
-    const top = px(hint!.style.top)
-    // Anchored under an element that ends 6px above the fold, the unclamped
-    // placement puts it entirely off the bottom of the screen.
-    expect(top).toBeGreaterThanOrEqual(0)
-    expect(top + hint!.getBoundingClientRect().height).toBeLessThanOrEqual(VIEWPORT.h)
+    const hint = findHint()
+    const geom = laidOutHint(hint)
+    // Anchored under an element that ends 6px above the fold, an unclamped
+    // placement starts the hint below the fold and its body lands off-screen.
+    expect(geom.top).toBeGreaterThanOrEqual(0)
+    expect(geom.bottom).toBeLessThanOrEqual(VIEWPORT.h)
+  })
+
+  it('keeps an INLINE_HINT on screen for an element at the right edge', () => {
+    box(harness.element, { left: VIEWPORT.w - 60, top: 300, width: 50, height: 24 })
+    render(intervention({ type: 'INLINE_HINT' }))
+
+    const hint = findHint()
+    const geom = laidOutHint(hint)
+    // The hint can be up to 300px wide; anchored at an element 60px from the
+    // right edge, an unclamped left offset pushes it off the side.
+    expect(geom.left).toBeGreaterThanOrEqual(8)
+    expect(geom.right).toBeLessThanOrEqual(VIEWPORT.w)
+  })
+
+  it('keeps a TOOLTIP on screen for a target as tall as the viewport', () => {
+    box(harness.element, { left: 100, top: 0, width: 400, height: VIEWPORT.h })
+    render(intervention({ type: 'TOOLTIP' }))
+
+    const tip = painted(harness.doc).find((el) => el.getAttribute('role') === 'tooltip')
+    expect(tip, 'the tooltip rendered').toBeTruthy()
+    box(tip!, { left: px(tip!.style.left), top: px(tip!.style.top), width: 280, height: 36 })
+    // With no room below OR above, the fallback `rect.top - 50` is negative and
+    // the tooltip is placed above the fold.
+    expect(px(tip!.style.top)).toBeGreaterThanOrEqual(0)
+    expect(tip!.getBoundingClientRect().bottom).toBeLessThanOrEqual(VIEWPORT.h)
   })
 
   it('keeps an ARROW on screen pointing at an element at the top edge', () => {
@@ -334,6 +358,36 @@ function round(n: number): number {
 }
 function px(v: string): number {
   return Number.parseFloat(v || '0')
+}
+
+/** The inline hint the renderer painted under the intervention root. */
+function findHint(): HTMLElement {
+  const hint = painted(harness.doc).find(
+    (el) =>
+      el !== rootEl(harness.doc) &&
+      el.textContent?.includes('finish this order') &&
+      el.style.borderRadius === '4px',
+  )
+  expect(hint, 'the inline hint rendered').toBeTruthy()
+  return hint!
+}
+
+/**
+ * jsdom lays nothing out, so a freshly rendered panel answers every box with
+ * 0x0 - and a containment assertion against a zero-height box is vacuously
+ * true at any offset. Give the hint the box a browser would give it (300px
+ * max-width, one 12px line) and return the rect the renderer's placement
+ * actually produces.
+ */
+function laidOutHint(hint: HTMLElement): {
+  top: number
+  bottom: number
+  left: number
+  right: number
+} {
+  box(hint, { left: px(hint.style.left), top: px(hint.style.top), width: 300, height: 22 })
+  const r = hint.getBoundingClientRect()
+  return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }
 }
 
 /**

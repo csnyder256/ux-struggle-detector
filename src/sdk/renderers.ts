@@ -472,10 +472,14 @@ function renderTooltip(target: HTMLElement | null, d: DispatchedIntervention, tt
     pointerEvents: 'auto',
     boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
   } as Partial<CSSStyleDeclaration>)
-  // Anchor below the element, fall back to above if no room.
+  // Anchor below the element, fall back to above if no room. A target as tall
+  // as the viewport has room on neither side, and `rect.top - 50` is then
+  // negative - off the top of the screen, where the user cannot see it. Clamp
+  // the final offset the way the other anchored panels do.
   const tipTop = rect.bottom + 8
   tip.style.left = `${Math.max(8, Math.min(window.innerWidth - 290, rect.left))}px`
-  tip.style.top = `${tipTop > window.innerHeight - 60 ? rect.top - 50 : tipTop}px`
+  const tipTopOrAbove = tipTop > window.innerHeight - 60 ? rect.top - 50 : tipTop
+  tip.style.top = `${Math.max(8, tipTopOrAbove)}px`
   root().appendChild(tip)
   // Highlight the target with a ring too.
   const ring = flashRing(target, 'pulse')
@@ -629,13 +633,31 @@ function renderInlineHint(target: HTMLElement | null, d: DispatchedIntervention,
     fontSize: '12px',
     fontWeight: '500',
     maxWidth: '300px',
-    left: `${rect.left}px`,
-    top: `${rect.bottom + 4}px`,
     zIndex: String(Z.card),
     pointerEvents: 'auto',
     boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+    // Positioned after measuring, so nothing flashes at the static position.
+    visibility: 'hidden',
   } as Partial<CSSStyleDeclaration>)
   root().appendChild(hint)
+  // Measure the real box in the document before placing it: a hint can wrap to
+  // several lines, so neither its width nor its height is a constant. jsdom has
+  // no layout and answers 0x0, so the fallbacks are the estimates the other
+  // anchored renderers use; a browser measures exactly.
+  const hintW = hint.offsetWidth || 300
+  const hintH = hint.offsetHeight || 24
+  // Clamp into the viewport, the way TOOLTIP and ARROW already do. An element
+  // near the right or bottom edge would otherwise anchor the hint off-screen -
+  // and a panel the user cannot see is indistinguishable from no intervention.
+  const left = clamp(rect.left, 8, Math.max(8, window.innerWidth - hintW - 8))
+  // Prefer below the element; flip above when the box would not fit, which is
+  // the only placement left for a target sitting on the fold.
+  const below = rect.bottom + 4
+  const top =
+    below + hintH <= window.innerHeight ? below : Math.max(8, rect.top - hintH - 4)
+  hint.style.left = `${left}px`
+  hint.style.top = `${top}px`
+  hint.style.visibility = 'visible'
   autoCleanup(hint, ttl)
 }
 
