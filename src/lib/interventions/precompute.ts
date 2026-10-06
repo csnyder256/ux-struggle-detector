@@ -130,6 +130,18 @@ interface PairInput {
   validation?: Record<string, unknown>
   routePath?: string
   routeTitle?: string | null
+  /**
+   * Context hash computed when the pair was SELECTED, reused verbatim when its
+   * variants are written. The idempotency check compares the freshly computed
+   * hash against the one stored on the cached row, so the two must be the same
+   * digest over the same inputs - computing it again at write time from a
+   * different descriptor (element id vs. element type + label + semantic name)
+   * produced two hashes that could never be equal, and the "already cached"
+   * branch never fired. Carry the selection-time hash instead of re-deriving
+   * it; `hashSemanticContext` is deterministic, so one computation per element
+   * is enough.
+   */
+  contextHash: string
   // Pass-2 route semantic (purpose + stage) gives the LLM a much sharper
   // sense of where in the user's task this struggle lives. E.g. on a
   // 'transact' page, the right intervention is more conservative.
@@ -327,6 +339,7 @@ export async function precomputeForOrg(orgId: string): Promise<PrecomputeResult>
         validation,
         routePath: el.routeTarget ?? undefined,
         routeTitle: el.routeTarget ? routeTitleByPath.get(el.routeTarget) ?? null : null,
+        contextHash,
         routePurpose: rsem?.purpose,
         journeyStage: rsem?.journeyStage,
         successCriteria: rsem?.successCriteria ?? null,
@@ -380,13 +393,12 @@ export async function precomputeForOrg(orgId: string): Promise<PrecomputeResult>
         )
         if (!input) continue
 
-        const contextHash = await hashSemanticContext({
-          platformDescription: platform?.platformDescription ?? '',
-          route: input.routePath ?? '',
-          parentComponent: null,
-          siblings: [],
-          selfDescriptor: `${input.elementId}:${input.semanticName}`,
-        })
+        // Reuse the hash the selection step already computed and compared
+        // against the cached row. Re-deriving it here from a different
+        // descriptor is what made `skippedCached` unreachable: the stored hash
+        // could never equal a freshly recomputed one, so every run regenerated
+        // and re-billed the LLM for pairs that had not changed.
+        const contextHash = input.contextHash
 
         const variants = (Array.isArray(pair.variants) ? pair.variants : []).slice(
           0,
