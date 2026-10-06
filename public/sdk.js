@@ -883,7 +883,8 @@ var ClarusHeal = (() => {
     });
     const tipTop = rect.bottom + 8;
     tip.style.left = `${Math.max(8, Math.min(window.innerWidth - 290, rect.left))}px`;
-    tip.style.top = `${tipTop > window.innerHeight - 60 ? rect.top - 50 : tipTop}px`;
+    const tipTopOrAbove = tipTop > window.innerHeight - 60 ? rect.top - 50 : tipTop;
+    tip.style.top = `${Math.max(8, tipTopOrAbove)}px`;
     root().appendChild(tip);
     const ring = flashRing(target, "pulse");
     root().appendChild(ring);
@@ -1019,13 +1020,21 @@ var ClarusHeal = (() => {
       fontSize: "12px",
       fontWeight: "500",
       maxWidth: "300px",
-      left: `${rect.left}px`,
-      top: `${rect.bottom + 4}px`,
       zIndex: String(Z.card),
       pointerEvents: "auto",
-      boxShadow: "0 2px 8px rgba(0,0,0,0.1)"
+      boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+      // Positioned after measuring, so nothing flashes at the static position.
+      visibility: "hidden"
     });
     root().appendChild(hint);
+    const hintW = hint.offsetWidth || 300;
+    const hintH = hint.offsetHeight || 24;
+    const left = clamp2(rect.left, 8, Math.max(8, window.innerWidth - hintW - 8));
+    const below = rect.bottom + 4;
+    const top = below + hintH <= window.innerHeight ? below : Math.max(8, rect.top - hintH - 4);
+    hint.style.left = `${left}px`;
+    hint.style.top = `${top}px`;
+    hint.style.visibility = "visible";
     autoCleanup(hint, ttl);
   }
   function renderTour(d, outcomeId = d.id) {

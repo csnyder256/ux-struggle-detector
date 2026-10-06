@@ -4,15 +4,15 @@ Captured with **headless Chromium driving the built SDK bundle** — not jsdom.
 
 | Fact | Value |
 | --- | --- |
-| Source (at capture) | `SDK bundles DIFFER from HEAD dbe4d514a1a53e8eba1615f6c60487d62bf5d6df; bundle inputs dirty at capture (public/sdk.js, public/sdk.min.js, src/sdk/index.ts); working tree DIRTY at capture (4 path(s) uncommitted, e.g. public/demo/demo.js, public/sdk.js, public/sdk.min.js, src/sdk/index.ts) - the capture uses the measured bundle bytes and records working-tree edits` |
-| HEAD at capture | `dbe4d514a1a53e8eba1615f6c60487d62bf5d6df` |
-| SDK bundle bytes vs HEAD | **DIFFER** - the executed bundle is not the blob committed at `dbe4d514a1a53e8eba1615f6c60487d62bf5d6df` |
-| Bundle inputs at capture | **dirty** - uncommitted edits to `public/sdk.js`, `public/sdk.min.js`, `src/sdk/index.ts` |
-| Working tree at capture | **DIRTY** - 4 uncommitted path(s): `public/demo/demo.js`, `public/sdk.js`, `public/sdk.min.js`, `src/sdk/index.ts`. This capture records the measured SDK bundle bytes above and uncommitted paths relative to `dbe4d514a1a53e8eba1615f6c60487d62bf5d6df` |
-| Chromium | `Chromium 154.0.8037.57 built on Debian GNU/Linux 12 (bookworm)` (`/usr/bin/chromium`) |
+| Source (at capture) | `SDK bundles DIFFER from HEAD e3f0d477895f1c9e2a354bc670fe94d0b6180291; bundle inputs dirty at capture (public/sdk.js, public/sdk.min.js); working tree DIRTY at capture (6 path(s) uncommitted, e.g. docs/browser-evidence.md, public/demo/demo.js, public/sdk.js, public/sdk.min.js) - the capture uses the measured bundle bytes and records working-tree edits` |
+| HEAD at capture | `e3f0d477895f1c9e2a354bc670fe94d0b6180291` |
+| SDK bundle bytes vs HEAD | **DIFFER** - the executed bundle is not the blob committed at `e3f0d477895f1c9e2a354bc670fe94d0b6180291` |
+| Bundle inputs at capture | **dirty** - uncommitted edits to `public/sdk.js`, `public/sdk.min.js` |
+| Working tree at capture | **DIRTY** - 6 uncommitted path(s): `docs/browser-evidence.md`, `public/demo/demo.js`, `public/sdk.js`, `public/sdk.min.js`, `src/sdk/renderers.ts`, `tests/sdk-renderers.test.ts`. This capture records the measured SDK bundle bytes above and uncommitted paths relative to `e3f0d477895f1c9e2a354bc670fe94d0b6180291` |
+| Chromium | `Chromium 154.0.8037.92 built on Debian GNU/Linux 12 (bookworm)` (`/usr/bin/chromium`) |
 | Node | `v22.23.2` |
-| `public/sdk.js` sha256 | `f15680ceff8724ffe9d9b79bc629fe30e33f0758ac90fcaa527560cb86d9717c` |
-| `public/sdk.min.js` sha256 | `837a2e384f2f1af6ee10bee021c23e40af09024b43c0317a1b303a14fc793c1e` |
+| `public/sdk.js` sha256 | `d8851e8fe4b8c518e0084f8eb0d1af2e94a3294261262e42f52be0179be35ce7` |
+| `public/sdk.min.js` sha256 | `b846ce8621fb1754b4926f20bbae9a37d775994817eeae14423c365d6e62fc12` |
 
 Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
 
@@ -20,24 +20,25 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
 
 ```json
 {
-  "headAtCapture": "dbe4d514a1a53e8eba1615f6c60487d62bf5d6df",
+  "headAtCapture": "e3f0d477895f1c9e2a354bc670fe94d0b6180291",
   "workingTreeDirtyAtCapture": true,
   "dirtyPathsAtCapture": [
+    "docs/browser-evidence.md",
     "public/demo/demo.js",
     "public/sdk.js",
     "public/sdk.min.js",
-    "src/sdk/index.ts"
+    "src/sdk/renderers.ts",
+    "tests/sdk-renderers.test.ts"
   ],
   "bundleSourceDirtyAtCapture": true,
   "bundleDirtyPathsAtCapture": [
     "public/sdk.js",
-    "public/sdk.min.js",
-    "src/sdk/index.ts"
+    "public/sdk.min.js"
   ],
   "sdkBundleMatchesHead": false,
   "sdkMinBundleMatchesHead": false,
   "bundleMatchesHead": false,
-  "sourceLabel": "SDK bundles DIFFER from HEAD dbe4d514a1a53e8eba1615f6c60487d62bf5d6df; bundle inputs dirty at capture (public/sdk.js, public/sdk.min.js, src/sdk/index.ts); working tree DIRTY at capture (4 path(s) uncommitted, e.g. public/demo/demo.js, public/sdk.js, public/sdk.min.js, src/sdk/index.ts) - the capture uses the measured bundle bytes and records working-tree edits"
+  "sourceLabel": "SDK bundles DIFFER from HEAD e3f0d477895f1c9e2a354bc670fe94d0b6180291; bundle inputs dirty at capture (public/sdk.js, public/sdk.min.js); working tree DIRTY at capture (6 path(s) uncommitted, e.g. docs/browser-evidence.md, public/demo/demo.js, public/sdk.js, public/sdk.min.js) - the capture uses the measured bundle bytes and records working-tree edits"
 }
 ```
 
@@ -98,18 +99,18 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
   "withValidity": [
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790663757473_iwx28r5h_1790663757481_p5fknjki",
-      "sessionId": "sh_sess_1790663757473_iwx28r5h",
+      "idempotencyKey": "sh_sess_1791323458714_etx542w9_1791323458724_s4vhsol3",
+      "sessionId": "sh_sess_1791323458714_etx542w9",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "FOCUS",
-      "ts": "2026-09-29T06:35:57.481Z",
+      "ts": "2026-10-06T21:50:58.724Z",
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 7
+        "ageMs": 9
       },
       "element": {
         "touched": true,
@@ -123,19 +124,19 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790663757473_iwx28r5h_1790663757483_axngrhr4",
-      "sessionId": "sh_sess_1790663757473_iwx28r5h",
+      "idempotencyKey": "sh_sess_1791323458714_etx542w9_1791323458727_6okvhpwt",
+      "sessionId": "sh_sess_1791323458714_etx542w9",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "CLICK",
-      "ts": "2026-09-29T06:35:57.483Z",
+      "ts": "2026-10-06T21:50:58.727Z",
       "meta": {},
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 10
+        "ageMs": 12
       },
       "element": {
         "touched": true,
@@ -149,18 +150,18 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790663757473_iwx28r5h_1790663757484_bv41all7",
-      "sessionId": "sh_sess_1790663757473_iwx28r5h",
+      "idempotencyKey": "sh_sess_1791323458714_etx542w9_1791323458728_5wd888cz",
+      "sessionId": "sh_sess_1791323458714_etx542w9",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "BLUR",
-      "ts": "2026-09-29T06:35:57.484Z",
+      "ts": "2026-10-06T21:50:58.728Z",
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 10
+        "ageMs": 13
       },
       "element": {
         "touched": true,
@@ -174,18 +175,18 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790663757473_iwx28r5h_1790663757485_ro1dozh1",
-      "sessionId": "sh_sess_1790663757473_iwx28r5h",
+      "idempotencyKey": "sh_sess_1791323458714_etx542w9_1791323458728_r2l3a6a9",
+      "sessionId": "sh_sess_1791323458714_etx542w9",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "FOCUS",
-      "ts": "2026-09-29T06:35:57.485Z",
+      "ts": "2026-10-06T21:50:58.728Z",
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 11
+        "ageMs": 13
       },
       "element": {
         "touched": true,
@@ -198,19 +199,19 @@ Command: `pnpm exec vitest run tests/browser-evidence.test.ts`
     },
     {
       "schemaVersion": 3,
-      "idempotencyKey": "sh_sess_1790663757473_iwx28r5h_1790663757485_3xwthyv6",
-      "sessionId": "sh_sess_1790663757473_iwx28r5h",
+      "idempotencyKey": "sh_sess_1791323458714_etx542w9_1791323458729_2905kuqe",
+      "sessionId": "sh_sess_1791323458714_etx542w9",
       "userIdHash": null,
       "elementId": null,
       "route": "blank",
       "eventType": "CLICK",
-      "ts": "2026-09-29T06:35:57.485Z",
+      "ts": "2026-10-06T21:50:58.729Z",
       "meta": {},
       "page": {
         "viewportW": 1280,
         "viewportH": 720,
         "formFactor": "desktop",
-        "ageMs": 11
+        "ageMs": 14
       },
       "element": {
         "touched": true,
