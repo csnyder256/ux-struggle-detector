@@ -470,3 +470,36 @@ it('rage severity counts the burst and excludes unrelated earlier clicks', () =>
   expect(rage.severity).toBe(0.5)
   expect(rage.summary).toMatch(/^3 clicks within /)
 })
+
+describe('detectStruggles - repeat search', () => {
+  function search(tsOffsetMs: number, query: string, elementId = E1): RuntimeEvent {
+    const e = makeEvent({ tsOffsetMs, eventType: 'SUBMIT', elementId })
+    e.meta = { kind: 'search', query }
+    return e
+  }
+
+  it('fires on the second identical search (minRepeats = 2)', () => {
+    // The smallest possible repeat: the user searched the same thing twice.
+    // Every other count rule fires at its declared minimum (minPastes=2 fires
+    // on the 2nd paste, minDismisses=2 on the 2nd dismiss), so this must too.
+    const events: RuntimeEvent[] = [search(0, 'widget'), search(4000, 'widget')]
+    const hits = detectStruggles(events).filter((d) => d.type === 'REPEAT_SEARCH')
+    expect(hits.length).toBe(1)
+    expect(hits[0]?.elementId).toBe(E1)
+    expect(hits[0]?.summary).toBe('Searched the same query 2 times')
+  })
+
+  it('does not fire when the two searches use different queries', () => {
+    const events: RuntimeEvent[] = [search(0, 'widget'), search(4000, 'gadget')]
+    expect(detectStruggles(events).some((d) => d.type === 'REPEAT_SEARCH')).toBe(false)
+  })
+
+  it('still reports a single detection for the same session and element', () => {
+    const events: RuntimeEvent[] = [
+      search(0, 'widget'),
+      search(4000, 'widget'),
+      search(8000, 'widget'),
+    ]
+    expect(detectStruggles(events).filter((d) => d.type === 'REPEAT_SEARCH').length).toBe(1)
+  })
+})

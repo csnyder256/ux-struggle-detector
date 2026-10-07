@@ -875,17 +875,24 @@ function detectRepeatSearch(events: RuntimeEvent[]): StruggleDetection[] {
       counts.set(q, arr)
     }
     for (const arr of counts.values()) {
-      if (arr.length > rule.minRepeats) {
-        const last = arr[arr.length - 1]!
-        out.push({
-          sessionId: last.sessionId,
-          elementId: last.elementId,
-          type: 'REPEAT_SEARCH',
-          severity: 0.5,
-          ts: last.ts,
-          summary: `Searched the same query ${arr.length} times`,
-        })
-      }
+      // Fire at the declared minimum, like every other count rule in this file
+      // (`minPastes`, `minToggles`, `minDismisses`, `minRetries`…). The `>`
+      // this replaces required one search PAST the minimum: with
+      // `minRepeats: 2`, a user who ran the same query twice - the smallest
+      // possible repeat, and the exact case the REPEAT_SEARCH copy ("Same
+      // query? Try a different phrasing") exists for - never produced a
+      // detection, so the friction dashboard and the intervention dispatcher
+      // never saw it.
+      if (arr.length < rule.minRepeats) continue
+      const last = arr[arr.length - 1]!
+      out.push({
+        sessionId: last.sessionId,
+        elementId: last.elementId,
+        type: 'REPEAT_SEARCH',
+        severity: 0.5,
+        ts: last.ts,
+        summary: `Searched the same query ${arr.length} times`,
+      })
     }
   }
   return out
