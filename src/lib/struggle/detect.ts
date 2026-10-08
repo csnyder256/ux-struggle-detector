@@ -156,6 +156,37 @@ function ts(e: RuntimeEvent): number {
   return Date.parse(e.ts)
 }
 
+/**
+ * The largest number of `ordered` events that fall inside one `windowMs` span,
+ * and the last event of that span. `ordered` must already be sorted by ts.
+ *
+ * Every "N in windowMs" rule is a sliding-window count, so the number it
+ * reports must be the count it actually saw inside a window - never the length
+ * of the whole session bucket. Otherwise a long calm session with one late
+ * burst claims every event happened inside the window, inflating both the
+ * user-facing summary and the severity (which feeds the intervention's
+ * confidence). RAGE_CLICK was already fixed to do this; this is that scan, so
+ * the other windowed rules share one implementation instead of re-deriving it.
+ */
+function maxInWindow(
+  ordered: RuntimeEvent[],
+  windowMs: number,
+): { count: number; end: RuntimeEvent } | null {
+  if (ordered.length === 0) return null
+  let left = 0
+  let bestCount = 0
+  let bestEnd = ordered[0]!
+  for (let right = 0; right < ordered.length; right++) {
+    while (ts(ordered[right]!) - ts(ordered[left]!) > windowMs) left++
+    const count = right - left + 1
+    if (count > bestCount) {
+      bestCount = count
+      bestEnd = ordered[right]!
+    }
+  }
+  return { count: bestCount, end: bestEnd }
+}
+
 // ── rules ────────────────────────────────────────────────────────────────────
 
 function detectRageClicks(
@@ -190,24 +221,14 @@ function detectRageClicks(
     if (clicks.length < minClicks) continue
     // Count the actual burst window; unrelated earlier clicks must not inflate
     // the severity or the claim about how many clicks occurred in this window.
-    let left = 0
-    let bestCount = 0
-    let bestEnd = clicks[0]!
-    for (let right = 0; right < clicks.length; right++) {
-      while (ts(clicks[right]!) - ts(clicks[left]!) > rule.windowMs) left++
-      const count = right - left + 1
-      if (count > bestCount) {
-        bestCount = count
-        bestEnd = clicks[right]!
-      }
-    }
-    if (bestCount >= minClicks) out.push({
-      sessionId: bestEnd.sessionId,
-      elementId: bestEnd.elementId,
+    const burst = maxInWindow(clicks, rule.windowMs)
+    if (burst && burst.count >= minClicks) out.push({
+      sessionId: burst.end.sessionId,
+      elementId: burst.end.elementId,
       type: 'RAGE_CLICK',
-      severity: Math.min(1, bestCount / (minClicks * 2)),
-      ts: bestEnd.ts,
-      summary: `${bestCount} clicks within ${rule.windowMs}ms${minClicks !== rule.minClicks ? ` (adapted threshold: ${minClicks})` : ''}`,
+      severity: Math.min(1, burst.count / (minClicks * 2)),
+      ts: burst.end.ts,
+      summary: `${burst.count} clicks within ${rule.windowMs}ms${minClicks !== rule.minClicks ? ` (adapted threshold: ${minClicks})` : ''}`,
     })
   }
   return out
@@ -282,21 +303,20 @@ function detectThrash(events: RuntimeEvent[]): StruggleDetection[] {
   )
   for (const changes of buckets.values()) {
     if (changes.length < rule.minChanges) continue
-    for (let i = rule.minChanges - 1; i < changes.length; i++) {
-      const start = changes[i - rule.minChanges + 1]!
-      const end = changes[i]!
-      if (ts(end) - ts(start) <= rule.windowMs) {
-        out.push({
-          sessionId: end.sessionId,
-          elementId: end.elementId,
-          type: 'THRASH',
-          severity: Math.min(1, changes.length / (rule.minChanges * 2)),
-          ts: end.ts,
-          summary: `${changes.length} input changes within ${rule.windowMs}ms`,
-        })
-        break
-      }
-    }
+    // Report the burst the rule actually saw - the most input changes in one
+    // windowMs span - not the whole session's change count. A session with a
+    // late thrash would otherwise claim every change landed in the window,
+    // inflating both the summary and the severity.
+    const burst = maxInWindow(changes, rule.windowMs)
+    if (!burst || burst.count < rule.minChanges) continue
+    out.push({
+      sessionId: burst.end.sessionId,
+      elementId: burst.end.elementId,
+      type: 'THRASH',
+      severity: Math.min(1, burst.count / (rule.minChanges * 2)),
+      ts: burst.end.ts,
+      summary: `${burst.count} input changes within ${rule.windowMs}ms`,
+    })
   }
   return out
 }
@@ -764,21 +784,18 @@ function detectRapidScroll(events: RuntimeEvent[]): StruggleDetection[] {
   for (const sess of sessions.values()) {
     const scrolls = sess.filter((e) => e.eventType === 'SCROLL')
     if (scrolls.length < rule.minScrolls) continue
-    for (let i = rule.minScrolls - 1; i < scrolls.length; i++) {
-      const start = scrolls[i - rule.minScrolls + 1]!
-      const end = scrolls[i]!
-      if (ts(end) - ts(start) <= rule.windowMs) {
-        out.push({
-          sessionId: end.sessionId,
-          elementId: null,
-          type: 'RAPID_SCROLL',
-          severity: 0.4,
-          ts: end.ts,
-          summary: `${scrolls.length} scroll events in ${rule.windowMs}ms`,
-        })
-        break
-      }
-    }
+    // Report the scroll burst inside one window, not the session's total scroll
+    // count - the same distinction RAGE_CLICK and THRASH make.
+    const burst = maxInWindow(scrolls, rule.windowMs)
+    if (!burst || burst.count < rule.minScrolls) continue
+    out.push({
+      sessionId: burst.end.sessionId,
+      elementId: null,
+      type: 'RAPID_SCROLL',
+      severity: 0.4,
+      ts: burst.end.ts,
+      summary: `${burst.count} scroll events in ${rule.windowMs}ms`,
+    })
   }
   return out
 }

@@ -470,3 +470,53 @@ it('rage severity counts the burst and excludes unrelated earlier clicks', () =>
   expect(rage.severity).toBe(0.5)
   expect(rage.summary).toMatch(/^3 clicks within /)
 })
+
+describe('detectStruggles - windowed count rules report the burst, not the session total', () => {
+  // A rule whose threshold is "N in windowMs" is a sliding-window count. The
+  // number it reports (and the severity derived from it) has to be the count it
+  // actually saw inside one window. Reporting the whole session bucket instead
+  // lets a long calm session with one late burst claim every event landed in
+  // the window - the exact failure RAGE_CLICK already had fixed.
+
+  it('THRASH counts only the changes inside the 4s window', () => {
+    // A 2s burst of 5 changes, then 5 calm changes much later on the same
+    // field. The rule fires on the burst, so the summary and severity must
+    // describe the burst, not all 10 changes in the session.
+    const events: RuntimeEvent[] = []
+    for (let i = 0; i < 5; i++) {
+      events.push(makeEvent({ tsOffsetMs: i * 500, eventType: 'INPUT_CHANGE', elementId: E1 }))
+    }
+    for (let i = 0; i < 5; i++) {
+      events.push(makeEvent({ tsOffsetMs: 60_000 + i * 5_000, eventType: 'INPUT_CHANGE', elementId: E1 }))
+    }
+    const thrash = detectStruggles(events).find((d) => d.type === 'THRASH')
+    expect(thrash?.summary).toBe('5 input changes within 4000ms')
+    expect(thrash?.severity).toBe(0.5)
+  })
+
+  it('THRASH still fires on a burst late in a long, calm session', () => {
+    const events: RuntimeEvent[] = []
+    for (let i = 0; i < 10; i++) {
+      events.push(makeEvent({ tsOffsetMs: i * 10_000, eventType: 'INPUT_CHANGE', elementId: E1 }))
+    }
+    const burstStart = 10 * 10_000
+    for (let i = 0; i < 5; i++) {
+      events.push(makeEvent({ tsOffsetMs: burstStart + i * 500, eventType: 'INPUT_CHANGE', elementId: E1 }))
+    }
+    const thrash = detectStruggles(events).find((d) => d.type === 'THRASH')
+    expect(thrash?.summary).toBe('5 input changes within 4000ms')
+    expect(Date.parse(thrash!.ts)).toBe(Date.parse(makeEvent({ tsOffsetMs: burstStart + 2000 }).ts))
+  })
+
+  it('RAPID_SCROLL counts only the scrolls inside the 2s window', () => {
+    const events: RuntimeEvent[] = []
+    for (let i = 0; i < 5; i++) {
+      events.push(makeEvent({ tsOffsetMs: i * 300, eventType: 'SCROLL' }))
+    }
+    for (let i = 0; i < 5; i++) {
+      events.push(makeEvent({ tsOffsetMs: 60_000 + i * 3_000, eventType: 'SCROLL' }))
+    }
+    const rapid = detectStruggles(events).find((d) => d.type === 'RAPID_SCROLL')
+    expect(rapid?.summary).toBe('5 scroll events in 2000ms')
+  })
+})
