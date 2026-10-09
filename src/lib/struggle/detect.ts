@@ -408,18 +408,20 @@ function detectPasteRepeat(events: RuntimeEvent[]): StruggleDetection[] {
   const buckets = bucketBySessionElement(events, (e) => e.eventType === 'PASTE')
   for (const arr of buckets.values()) {
     if (arr.length < rule.minPastes) continue
-    const start = arr[0]!
-    const end = arr[arr.length - 1]!
-    if (ts(end) - ts(start) <= rule.windowMs) {
-      out.push({
-        sessionId: end.sessionId,
-        elementId: end.elementId,
-        type: 'PASTE_REPEAT',
-        severity: 0.5,
-        ts: end.ts,
-        summary: `${arr.length} paste events`,
-      })
-    }
+    // Fire on the densest run of pastes inside any window, not only when every
+    // paste in the session happens to fit in one. Requiring the session's first
+    // and last paste to be within windowMs hid the repeated-paste burst the
+    // rule exists for whenever the user pasted once earlier in the session.
+    const burst = maxCountInWindow(arr, rule.windowMs)
+    if (burst.count < rule.minPastes) continue
+    out.push({
+      sessionId: burst.end.sessionId,
+      elementId: burst.end.elementId,
+      type: 'PASTE_REPEAT',
+      severity: 0.5,
+      ts: burst.end.ts,
+      summary: `${burst.count} paste events`,
+    })
   }
   return out
 }
@@ -582,18 +584,20 @@ function detectBackThrash(events: RuntimeEvent[]): StruggleDetection[] {
       (e) => e.eventType === 'NAVIGATION' && e.meta?.trigger === 'popstate',
     )
     if (backs.length < rule.minBackEvents) continue
-    const start = backs[0]!
-    const end = backs[backs.length - 1]!
-    if (ts(end) - ts(start) <= rule.windowMs) {
-      out.push({
-        sessionId: end.sessionId,
-        elementId: null,
-        type: 'BACK_THRASH',
-        severity: 0.5,
-        ts: end.ts,
-        summary: `${backs.length} back nav events`,
-      })
-    }
+    // A burst of back navigations is thrash even when the session has other
+    // back presses spread across it. Measuring the whole bucket's span only
+    // fired when every back press fit in one window, so an earlier single
+    // back tap anywhere in the session silenced a later burst.
+    const burst = maxCountInWindow(backs, rule.windowMs)
+    if (burst.count < rule.minBackEvents) continue
+    out.push({
+      sessionId: burst.end.sessionId,
+      elementId: null,
+      type: 'BACK_THRASH',
+      severity: 0.5,
+      ts: burst.end.ts,
+      summary: `${burst.count} back nav events`,
+    })
   }
   return out
 }
@@ -936,18 +940,21 @@ function detectMenuThrash(events: RuntimeEvent[]): StruggleDetection[] {
   )
   for (const arr of buckets.values()) {
     if (arr.length < rule.minToggles) continue
-    const start = arr[0]!
-    const end = arr[arr.length - 1]!
-    if (ts(end) - ts(start) <= rule.windowMs) {
-      out.push({
-        sessionId: end.sessionId,
-        elementId: end.elementId,
-        type: 'MENU_THRASH',
-        severity: 0.45,
-        ts: end.ts,
-        summary: `Toggled menu ${arr.length} times`,
-      })
-    }
+    // Fire on the densest run of toggles inside any window, not only when every
+    // toggle in the session fits in one. A user who opens the menu three times
+    // in five seconds cannot find what they want even if they opened it once
+    // two minutes earlier - requiring the whole session's toggles to fit in a
+    // single window hid exactly the burst the rule exists for.
+    const burst = maxCountInWindow(arr, rule.windowMs)
+    if (burst.count < rule.minToggles) continue
+    out.push({
+      sessionId: burst.end.sessionId,
+      elementId: burst.end.elementId,
+      type: 'MENU_THRASH',
+      severity: 0.45,
+      ts: burst.end.ts,
+      summary: `Toggled menu ${burst.count} times`,
+    })
   }
   return out
 }
@@ -985,18 +992,19 @@ function detectTabHopping(events: RuntimeEvent[]): StruggleDetection[] {
         (e.eventType === 'FOCUS' && e.meta?.target === 'window'),
     )
     if (switches.length < rule.minSwitches) continue
-    const start = switches[0]!
-    const end = switches[switches.length - 1]!
-    if (ts(end) - ts(start) <= rule.windowMs) {
-      out.push({
-        sessionId: end.sessionId,
-        elementId: null,
-        type: 'TAB_HOPPING',
-        severity: 0.4,
-        ts: end.ts,
-        summary: `Switched tabs ${switches.length} times`,
-      })
-    }
+    // Fire on the densest run of tab switches inside any window. The rule is a
+    // burst rule - many switches close together - so a single switch earlier or
+    // later in the session must not require the whole set to fit one window.
+    const burst = maxCountInWindow(switches, rule.windowMs)
+    if (burst.count < rule.minSwitches) continue
+    out.push({
+      sessionId: burst.end.sessionId,
+      elementId: null,
+      type: 'TAB_HOPPING',
+      severity: 0.4,
+      ts: burst.end.ts,
+      summary: `Switched tabs ${burst.count} times`,
+    })
   }
   return out
 }
@@ -1193,4 +1201,35 @@ function detectHelpHunt(events: RuntimeEvent[]): StruggleDetection[] {
     })
   }
   return out
+}
+
+/**
+ * The largest number of `ordered` events that fall inside one `windowMs` span,
+ * and the last event of that span. `ordered` must already be sorted by ts and
+ * non-empty.
+ *
+ * Every "N in windowMs" rule is a burst rule: it exists to catch N events
+ * bunched close together in time. A rule that instead measures the span of the
+ * whole session bucket - first event to last - only fires when every event the
+ * session ever produced happens to fit in one window, so a real burst is missed
+ * the moment the user does anything unrelated earlier or later in the session.
+ * That is the same shape RAGE_CLICK already scans; this is that scan, shared by
+ * the count rules below so they fire on any burst rather than only on a prefix.
+ */
+function maxCountInWindow(
+  ordered: RuntimeEvent[],
+  windowMs: number,
+): { count: number; end: RuntimeEvent } {
+  let left = 0
+  let bestCount = 0
+  let bestEnd = ordered[0]!
+  for (let right = 0; right < ordered.length; right++) {
+    while (ts(ordered[right]!) - ts(ordered[left]!) > windowMs) left++
+    const count = right - left + 1
+    if (count > bestCount) {
+      bestCount = count
+      bestEnd = ordered[right]!
+    }
+  }
+  return { count: bestCount, end: bestEnd }
 }

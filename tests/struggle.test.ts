@@ -412,6 +412,81 @@ describe('detectStruggles - paste repeat', () => {
   })
 })
 
+describe('detectStruggles - windowed count rules fire on a burst anywhere in the session', () => {
+  // A rule whose threshold is "N in windowMs" is a burst rule: it catches N
+  // events bunched close together. Measuring the whole session bucket's span
+  // (first event to last) instead only fires when every event the session ever
+  // produced happens to fit in one window - so a real burst is missed the
+  // moment the user does anything unrelated earlier or later in the session.
+  function menuToggle(tsOffsetMs: number): RuntimeEvent {
+    const e = makeEvent({ tsOffsetMs, eventType: 'CLICK', elementId: E1 })
+    e.meta = { role: 'menu' }
+    return e
+  }
+  function backNav(tsOffsetMs: number): RuntimeEvent {
+    const e = makeEvent({ tsOffsetMs, eventType: 'NAVIGATION' })
+    e.meta = { trigger: 'popstate' }
+    return e
+  }
+  function tabSwitch(tsOffsetMs: number, kind: 'BLUR' | 'FOCUS'): RuntimeEvent {
+    const e = makeEvent({ tsOffsetMs, eventType: kind })
+    e.meta = { target: 'window' }
+    return e
+  }
+
+  it('MENU_THRASH fires on a burst that follows an earlier, unrelated toggle', () => {
+    // One toggle two minutes earlier, then three inside the 5s window. Measuring
+    // the whole session's span (first to last) exceeded the window, so the rule
+    // never fired and the menu-thrash it exists for was missed.
+    const events = [
+      menuToggle(0),
+      menuToggle(120_000),
+      menuToggle(120_500),
+      menuToggle(121_000),
+    ]
+    const hit = detectStruggles(events).find((d) => d.type === 'MENU_THRASH')
+    expect(hit).toBeDefined()
+    // The count is the window's, not the session's four toggles.
+    expect(hit!.summary).toBe('Toggled menu 3 times')
+  })
+
+  it('MENU_THRASH does not fire when no window holds the minimum', () => {
+    // Three toggles, each 10s from the next: no 5s window contains more than one.
+    const events = [menuToggle(0), menuToggle(10_000), menuToggle(20_000)]
+    expect(detectStruggles(events).some((d) => d.type === 'MENU_THRASH')).toBe(false)
+  })
+
+  it('PASTE_REPEAT fires on a repeat burst after an earlier single paste', () => {
+    const events = [
+      makeEvent({ tsOffsetMs: 0, eventType: 'PASTE', elementId: E1 }),
+      makeEvent({ tsOffsetMs: 60_000, eventType: 'PASTE', elementId: E1 }),
+      makeEvent({ tsOffsetMs: 60_400, eventType: 'PASTE', elementId: E1 }),
+    ]
+    const hit = detectStruggles(events).find((d) => d.type === 'PASTE_REPEAT')
+    expect(hit).toBeDefined()
+    expect(hit!.summary).toBe('2 paste events')
+  })
+
+  it('BACK_THRASH fires on a back-button burst after an earlier back press', () => {
+    const events = [backNav(0), backNav(90_000), backNav(90_400), backNav(90_800)]
+    const hit = detectStruggles(events).find((d) => d.type === 'BACK_THRASH')
+    expect(hit).toBeDefined()
+    expect(hit!.summary).toBe('3 back nav events')
+  })
+
+  it('TAB_HOPPING fires on a switch burst after an earlier switch', () => {
+    const events = [
+      tabSwitch(0, 'BLUR'),
+      tabSwitch(150_000, 'BLUR'),
+      tabSwitch(150_300, 'FOCUS'),
+      tabSwitch(150_600, 'BLUR'),
+    ]
+    const hit = detectStruggles(events).find((d) => d.type === 'TAB_HOPPING')
+    expect(hit).toBeDefined()
+    expect(hit!.summary).toBe('Switched tabs 3 times')
+  })
+})
+
 describe('detectStruggles - locked out', () => {
   it('fires after 5+ login validation errors', () => {
     const events: RuntimeEvent[] = []
