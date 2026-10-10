@@ -301,6 +301,38 @@ function detectThrash(events: RuntimeEvent[]): StruggleDetection[] {
   return out
 }
 
+/**
+ * The densest run of `items` inside any `windowMs` span, and the last item of
+ * that run. `items` must already be ordered by `time` ascending.
+ *
+ * Every "N of these within windowMs" rule is a burst rule: it exists to catch N
+ * occurrences bunched close together in time. A rule that instead counts the
+ * occurrences across the whole session bucket and then gates on the bucket's
+ * TOTAL span - first item to last - only fires when everything the session ever
+ * produced happens to fit in one window, so the burst is missed the moment the
+ * user also did something related earlier or later. RAGE_CLICK already scans its
+ * bucket this way; this is that scan, shared by the burst rules that need it.
+ */
+function densestWindow<T>(
+  items: T[],
+  windowMs: number,
+  time: (item: T) => number,
+): { count: number; last: T } | null {
+  if (items.length === 0) return null
+  let left = 0
+  let bestCount = 0
+  let bestLast = items[0]!
+  for (let right = 0; right < items.length; right++) {
+    while (time(items[right]!) - time(items[left]!) > windowMs) left++
+    const count = right - left + 1
+    if (count > bestCount) {
+      bestCount = count
+      bestLast = items[right]!
+    }
+  }
+  return { count: bestCount, last: bestLast }
+}
+
 function detectBacktrack(events: RuntimeEvent[]): StruggleDetection[] {
   // Detect input length cycle: grew → shrunk → grew. Requires meta.length.
   const rule = DEFAULT_STRUGGLE_RULES.backtrack
@@ -308,31 +340,36 @@ function detectBacktrack(events: RuntimeEvent[]): StruggleDetection[] {
   const buckets = bucketBySessionElement(events, (e) => e.eventType === 'INPUT_CHANGE')
   for (const changes of buckets.values()) {
     if (changes.length < 4) continue
-    let cycles = 0
+    // Record WHEN each write/erase cycle completed, then measure the densest
+    // burst of cycles inside one window. Counting cycles across the whole bucket
+    // and gating on the bucket's total span only fired when every input change
+    // in the session happened to fit in one window, so a real flurry of
+    // edit/undo cycles was missed as soon as the field also had an earlier or
+    // later edit - which is the normal case for a field a user is fighting.
+    const cycles: RuntimeEvent[] = []
     let direction: 'up' | 'down' | null = null
     let prevLen: number | null = null
-    const firstInWindow = changes[0]!
     for (const c of changes) {
       const len = typeof c.meta?.length === 'number' ? c.meta.length : null
       if (len === null) continue
       if (prevLen !== null && len !== prevLen) {
         const newDir = len > prevLen ? 'up' : 'down'
-        if (direction !== null && direction !== newDir) cycles++
+        if (direction !== null && direction !== newDir) cycles.push(c)
         direction = newDir
       }
       prevLen = len
     }
-    if (cycles >= rule.cycles && ts(changes[changes.length - 1]!) - ts(firstInWindow) <= rule.windowMs) {
-      const last = changes[changes.length - 1]!
-      out.push({
-        sessionId: last.sessionId,
-        elementId: last.elementId,
-        type: 'BACKTRACK',
-        severity: 0.55,
-        ts: last.ts,
-        summary: `${cycles} write/erase cycles`,
-      })
-    }
+    const burst = densestWindow(cycles, rule.windowMs, ts)
+    if (!burst || burst.count < rule.cycles) continue
+    const last = burst.last
+    out.push({
+      sessionId: last.sessionId,
+      elementId: last.elementId,
+      type: 'BACKTRACK',
+      severity: 0.55,
+      ts: last.ts,
+      summary: `${burst.count} write/erase cycles`,
+    })
   }
   return out
 }
@@ -792,25 +829,30 @@ function detectScrollOvershoot(events: RuntimeEvent[]): StruggleDetection[] {
       .filter((e) => e.eventType === 'SCROLL')
       .map((e) => ({ e, dy: typeof e.meta?.dy === 'number' ? e.meta.dy : 0 }))
     if (scrolls.length < 4) continue
-    let reversals = 0
+    // Collect WHEN each direction reversal happened, then measure the densest
+    // burst of reversals in one window. Counting reversals across the whole
+    // session and gating on the session's total scroll span only fired when
+    // every scroll of the session happened to fit in one window, so a burst of
+    // overshoot reversals was missed whenever the user had also scrolled
+    // normally earlier in the session.
+    const reversals: RuntimeEvent[] = []
     let prevSign = 0
     for (const s of scrolls) {
       const sign = Math.sign(s.dy)
-      if (sign !== 0 && prevSign !== 0 && sign !== prevSign) reversals++
+      if (sign !== 0 && prevSign !== 0 && sign !== prevSign) reversals.push(s.e)
       if (sign !== 0) prevSign = sign
     }
-    const span = ts(scrolls[scrolls.length - 1]!.e) - ts(scrolls[0]!.e)
-    if (reversals >= rule.reversals && span <= rule.windowMs) {
-      const last = scrolls[scrolls.length - 1]!.e
-      out.push({
-        sessionId: last.sessionId,
-        elementId: null,
-        type: 'SCROLL_OVERSHOOT',
-        severity: 0.4,
-        ts: last.ts,
-        summary: `${reversals} scroll-direction reversals`,
-      })
-    }
+    const burst = densestWindow(reversals, rule.windowMs, ts)
+    if (!burst || burst.count < rule.reversals) continue
+    const last = burst.last
+    out.push({
+      sessionId: last.sessionId,
+      elementId: null,
+      type: 'SCROLL_OVERSHOOT',
+      severity: 0.4,
+      ts: last.ts,
+      summary: `${burst.count} scroll-direction reversals`,
+    })
   }
   return out
 }

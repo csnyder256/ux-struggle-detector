@@ -470,3 +470,82 @@ it('rage severity counts the burst and excludes unrelated earlier clicks', () =>
   expect(rage.severity).toBe(0.5)
   expect(rage.summary).toMatch(/^3 clicks within /)
 })
+
+// ─── Burst rules: measure the window, not the whole session ──────────────────
+
+/** makeEvent + meta, since makeEvent() does not take a meta field. */
+function withMeta(
+  e: RuntimeEvent,
+  meta: Record<string, string | number | boolean | null>,
+): RuntimeEvent {
+  e.meta = meta
+  return e
+}
+
+describe('detectStruggles - backtrack measures the burst, not the session span', () => {
+  it('fires on a flurry of write/erase cycles even when the field had earlier edits', () => {
+    // Two calm edits early in the session, then a real burst of grow/shrink
+    // cycles at t=60s. A detector that counts cycles across the whole bucket and
+    // then requires the bucket's first-to-last span to fit the 8s window never
+    // sees it: the early edits alone push the span to 62s. The burst is what the
+    // rule is for, so it must fire - and be reported at the burst.
+    const early = [
+      withMeta(makeEvent({ tsOffsetMs: 0, eventType: 'INPUT_CHANGE', elementId: E1 }), { length: 3 }),
+      withMeta(makeEvent({ tsOffsetMs: 4000, eventType: 'INPUT_CHANGE', elementId: E1 }), { length: 5 }),
+    ]
+    const burstStart = 60_000
+    const burst = [5, 3, 5, 3, 5].map((length, i) =>
+      withMeta(
+        makeEvent({ tsOffsetMs: burstStart + i * 500, eventType: 'INPUT_CHANGE', elementId: E1 }),
+        { length },
+      ),
+    )
+    const r = detectStruggles([...early, ...burst]).filter((d) => d.type === 'BACKTRACK')
+    expect(r.length).toBe(1)
+    expect(r[0]?.elementId).toBe(E1)
+    // Reported at the last cycle of the burst, not at the start of the session.
+    expect(Date.parse(r[0]!.ts)).toBe(
+      Date.parse(makeEvent({ tsOffsetMs: burstStart + 2000 }).ts),
+    )
+  })
+
+  it('does not fire when the cycles are spread beyond the window', () => {
+    const lengths = [1, 2, 1, 2, 1, 2]
+    const events = lengths.map((length, i) =>
+      withMeta(
+        makeEvent({ tsOffsetMs: i * 10_000, eventType: 'INPUT_CHANGE', elementId: E1 }),
+        { length },
+      ),
+    )
+    expect(detectStruggles(events).filter((d) => d.type === 'BACKTRACK').length).toBe(0)
+  })
+})
+
+describe('detectStruggles - scroll overshoot measures the burst, not the session span', () => {
+  it('fires on a late burst of direction reversals after earlier scrolling', () => {
+    // Normal downward scrolling for the first 9s, then a rapid up/down/up/down
+    // overshoot burst at t=60s. A detector that counts reversals over the whole
+    // session and then requires the session's total scroll span to fit the 6s
+    // window never fires; the reversal burst is the signal.
+    const early = Array.from({ length: 4 }, (_, i) =>
+      withMeta(makeEvent({ tsOffsetMs: i * 3000, eventType: 'SCROLL' }), { dy: 200 }),
+    )
+    const burstStart = 60_000
+    const burst = [200, -200, 200, -200].map((dy, i) =>
+      withMeta(makeEvent({ tsOffsetMs: burstStart + i * 500, eventType: 'SCROLL' }), { dy }),
+    )
+    const r = detectStruggles([...early, ...burst]).filter((d) => d.type === 'SCROLL_OVERSHOOT')
+    expect(r.length).toBe(1)
+    expect(Date.parse(r[0]!.ts)).toBe(
+      Date.parse(makeEvent({ tsOffsetMs: burstStart + 1500 }).ts),
+    )
+  })
+
+  it('does not fire when the reversals are spread beyond the window', () => {
+    const dys = [200, -200, 200, -200, 200]
+    const events = dys.map((dy, i) =>
+      withMeta(makeEvent({ tsOffsetMs: i * 10_000, eventType: 'SCROLL' }), { dy }),
+    )
+    expect(detectStruggles(events).filter((d) => d.type === 'SCROLL_OVERSHOOT').length).toBe(0)
+  })
+})
