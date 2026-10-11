@@ -544,6 +544,10 @@ function detectSilentFails(events: RuntimeEvent[]): StruggleDetection[] {
   const out: StruggleDetection[] = []
   const sessions = bySession(events)
   for (const sess of sessions.values()) {
+    // The newest event the detector has seen for this session. The rule is
+    // "no follow-up within windowMs", so it is only true once the session has
+    // actually reached windowMs past the submit with nothing in between.
+    const lastEventTime = Math.max(...sess.map(ts))
     for (let i = 0; i < sess.length; i++) {
       const e = sess[i]!
       if (e.eventType !== 'SUBMIT') continue
@@ -558,16 +562,27 @@ function detectSilentFails(events: RuntimeEvent[]): StruggleDetection[] {
           break
         }
       }
-      if (!hasFollowup) {
-        out.push({
-          sessionId: e.sessionId,
-          elementId: e.elementId,
-          type: 'SILENT_FAIL',
-          severity: 0.7,
-          ts: e.ts,
-          summary: 'Submitted, nothing happened',
-        })
-      }
+      if (hasFollowup) continue
+      // A batch that ends on the SUBMIT is not evidence that nothing followed:
+      // the app may simply not have responded yet. The SDK flushes every few
+      // seconds and a slow POST is still in flight, so "the submit is the
+      // newest event" is the normal shape of any submit the user has not yet
+      // followed with another interaction - and the detector would call it
+      // SILENT_FAIL on the first flush after every submit. That is the exact
+      // false positive the rule's own windowMs exists to prevent, it renders
+      // the "didn't go through" banner while the request is still running, and
+      // it is persisted as a StruggleEvent row, so it is not a transient
+      // mistake. Require the observed session to reach windowMs past the
+      // submit - the same elapsed-idle gate DEAD_END and IDLE_AFTER_LOAD use.
+      if (lastEventTime - submitTs < rule.windowMs) continue
+      out.push({
+        sessionId: e.sessionId,
+        elementId: e.elementId,
+        type: 'SILENT_FAIL',
+        severity: 0.7,
+        ts: e.ts,
+        summary: 'Submitted, nothing happened',
+      })
     }
   }
   return out

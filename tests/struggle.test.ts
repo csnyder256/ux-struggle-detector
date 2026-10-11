@@ -221,8 +221,36 @@ describe('detectStruggles - thrash', () => {
 describe('detectStruggles - silent fail', () => {
   it('fires when a SUBMIT has no follow-up event in the window', () => {
     const events: RuntimeEvent[] = [
+      makeEvent({ tsOffsetMs: 0, eventType: 'SUBMIT', elementId: E1 }),
+      // The session carried on for longer than the rule's window with nothing
+      // in it - that silence is what the rule reports.
+      makeEvent({ tsOffsetMs: 9000, eventType: 'SCROLL' }),
+    ]
+    const result = detectStruggles(events)
+    expect(result.filter((d) => d.type === 'SILENT_FAIL').length).toBe(1)
+  })
+
+  it('does not fire while the SUBMIT is still the newest event observed', () => {
+    // A batch that ends on the submit is the normal shape of any submit the
+    // user has not yet followed with another interaction: the SDK flushes every
+    // few seconds and a slow POST is still in flight. There is no evidence the
+    // window elapsed, so the rule must not call it "nothing happened" - the
+    // banner would render over a request that is still running, and the row is
+    // persisted to the friction dashboard.
+    const events: RuntimeEvent[] = [
       makeEvent({ tsOffsetMs: 0, eventType: 'CLICK', elementId: E1 }),
       makeEvent({ tsOffsetMs: 500, eventType: 'SUBMIT', elementId: E1 }),
+    ]
+    const result = detectStruggles(events)
+    expect(result.filter((d) => d.type === 'SILENT_FAIL').length).toBe(0)
+  })
+
+  it('fires once the window has elapsed, even when the follow-up is outside it', () => {
+    // The submit is no longer the newest event, but the only later event is
+    // past the window - the app never reacted within it, so the rule fires.
+    const events: RuntimeEvent[] = [
+      makeEvent({ tsOffsetMs: 0, eventType: 'SUBMIT', elementId: E1 }),
+      makeEvent({ tsOffsetMs: 9000, eventType: 'CLICK', elementId: E1 }),
     ]
     const result = detectStruggles(events)
     expect(result.filter((d) => d.type === 'SILENT_FAIL').length).toBe(1)
