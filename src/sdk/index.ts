@@ -429,6 +429,17 @@ function initInner(opts: InitOptions): void {
       if (!hasHandler(interactive)) meta.dead = true
       const role = inferRole(interactive)
       if (role) meta.role = role
+      // Where the pointer actually was. The server's mis-click rule is defined
+      // as two clicks inside its interval *with the cursor moving N pixels*,
+      // and it cannot tell a real mis-click from two deliberate clicks on two
+      // distant controls without this. A keyboard-activated click (Enter/Space
+      // on a focused control) reports 0,0, so it is left off rather than
+      // recorded as the top-left corner of the viewport.
+      const pointer = e as MouseEvent
+      if (pointer.clientX !== 0 || pointer.clientY !== 0) {
+        meta.x = Math.round(pointer.clientX)
+        meta.y = Math.round(pointer.clientY)
+      }
       void emit('CLICK', interactive, meta).then((ev) => {
         if (!ev) return
         const result = rage.observe(ev.elementId)

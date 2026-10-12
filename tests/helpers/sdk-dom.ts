@@ -174,9 +174,18 @@ export function moveMouse(target?: Element | null): void {
 }
 
 /** A real click through the SDK's own listener (same view rule as moveMouse). */
-export function click(el: Element): void {
+export function click(
+  el: Element,
+  coords?: { clientX: number; clientY: number },
+): void {
   const view = el.ownerDocument.defaultView ?? globalThis.window
-  el.dispatchEvent(new view.MouseEvent('click', { bubbles: true, cancelable: true }))
+  el.dispatchEvent(
+    new view.MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+      ...(coords ? { clientX: coords.clientX, clientY: coords.clientY } : {}),
+    }),
+  )
 }
 
 export function eventsOf(events: RuntimeEvent[], type: string): RuntimeEvent[] {

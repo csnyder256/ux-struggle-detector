@@ -1376,6 +1376,11 @@ var ClarusHeal = (() => {
         if (!hasHandler(interactive)) meta.dead = true;
         const role = inferRole(interactive);
         if (role) meta.role = role;
+        const pointer = e;
+        if (pointer.clientX !== 0 || pointer.clientY !== 0) {
+          meta.x = Math.round(pointer.clientX);
+          meta.y = Math.round(pointer.clientY);
+        }
         void emit("CLICK", interactive, meta).then((ev) => {
           if (!ev) return;
           const result = rage.observe(ev.elementId);
