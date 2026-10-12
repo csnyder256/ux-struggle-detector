@@ -470,3 +470,59 @@ it('rage severity counts the burst and excludes unrelated earlier clicks', () =>
   expect(rage.severity).toBe(0.5)
   expect(rage.summary).toMatch(/^3 clicks within /)
 })
+
+describe('detectStruggles - mis click', () => {
+  /** A click that carries the pointer position the SDK records. */
+  function placed(
+    e: RuntimeEvent,
+    x: number,
+    y: number,
+  ): RuntimeEvent {
+    e.meta = { x, y }
+    return e
+  }
+
+  it('fires when a second click on another element lands close by inside the interval', () => {
+    const a = placed(makeEvent({ tsOffsetMs: 0, eventType: 'CLICK', elementId: E1 }), 400, 300)
+    const b = placed(makeEvent({ tsOffsetMs: 140, eventType: 'CLICK', elementId: E2 }), 440, 330)
+    const mis = detectStruggles([a, b]).filter((d) => d.type === 'MIS_CLICK')
+    expect(mis.length).toBe(1)
+    expect(mis[0]?.elementId).toBe(E2)
+  })
+
+  it('does not fire when two quick clicks land far apart', () => {
+    // Two deliberate clicks on two distant controls: the cursor travelled well
+    // past the rule's proximity, so the second click was not a missed target.
+    const a = placed(makeEvent({ tsOffsetMs: 0, eventType: 'CLICK', elementId: E1 }), 60, 920)
+    const b = placed(makeEvent({ tsOffsetMs: 140, eventType: 'CLICK', elementId: E2 }), 1180, 90)
+    expect(detectStruggles([a, b]).filter((d) => d.type === 'MIS_CLICK').length).toBe(0)
+  })
+
+  it('does not fire when the two clicks are further apart in time than the interval', () => {
+    const a = placed(makeEvent({ tsOffsetMs: 0, eventType: 'CLICK', elementId: E1 }), 400, 300)
+    const b = placed(makeEvent({ tsOffsetMs: 900, eventType: 'CLICK', elementId: E2 }), 405, 305)
+    expect(detectStruggles([a, b]).filter((d) => d.type === 'MIS_CLICK').length).toBe(0)
+  })
+
+  it('does not fire for two clicks on the same element', () => {
+    const a = placed(makeEvent({ tsOffsetMs: 0, eventType: 'CLICK', elementId: E1 }), 400, 300)
+    const b = placed(makeEvent({ tsOffsetMs: 140, eventType: 'CLICK', elementId: E1 }), 460, 360)
+    expect(detectStruggles([a, b]).filter((d) => d.type === 'MIS_CLICK').length).toBe(0)
+  })
+
+  it('keeps the time-only reading for clicks that carry no coordinates', () => {
+    // A keyboard-activated click, or a batch from an SDK build still cached in
+    // a browser, has no pointer position; it must behave as it did before.
+    const a = makeEvent({ tsOffsetMs: 0, eventType: 'CLICK', elementId: E1 })
+    const b = makeEvent({ tsOffsetMs: 140, eventType: 'CLICK', elementId: E2 })
+    expect(detectStruggles([a, b]).filter((d) => d.type === 'MIS_CLICK').length).toBe(1)
+  })
+
+  it('falls back to the time-only reading when only one click carries coordinates', () => {
+    // Half a position is not a proximity claim; a missing coordinate must not
+    // be read as 0, which would put one click at the top-left of the viewport.
+    const a = placed(makeEvent({ tsOffsetMs: 0, eventType: 'CLICK', elementId: E1 }), 60, 920)
+    const b = makeEvent({ tsOffsetMs: 140, eventType: 'CLICK', elementId: E2 })
+    expect(detectStruggles([a, b]).filter((d) => d.type === 'MIS_CLICK').length).toBe(1)
+  })
+})

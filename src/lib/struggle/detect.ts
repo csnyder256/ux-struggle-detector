@@ -213,6 +213,16 @@ function detectRageClicks(
   return out
 }
 
+/**
+ * A pointer coordinate the SDK recorded on a click, or `null` when the event
+ * carries none (a keyboard-activated click, or a batch from an SDK build that
+ * predates the capture).
+ */
+function pointerCoord(e: RuntimeEvent, key: 'x' | 'y'): number | null {
+  const value = e.meta?.[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
 function detectMisClicks(events: RuntimeEvent[]): StruggleDetection[] {
   const rule = DEFAULT_STRUGGLE_RULES.misClick
   const out: StruggleDetection[] = []
@@ -224,6 +234,22 @@ function detectMisClicks(events: RuntimeEvent[]): StruggleDetection[] {
       const b = clicks[i]!
       if (a.elementId === b.elementId) continue
       if (ts(b) - ts(a) > rule.intervalMs) continue
+      // The rule is two clicks inside the interval *with the cursor moving N
+      // pixels* - time alone is only half of it. Two deliberate clicks on two
+      // distant controls (a nav link, then a sidebar item) land well inside
+      // 300ms and were reported as a mis-click on a user who was never
+      // confused, which is the false positive this product is biased against.
+      // When both clicks carry the coordinates the SDK sends, the cursor has
+      // to have stayed inside `proximityPx`; a click without them keeps the
+      // time-only reading rather than being silently dropped, so batches from
+      // older SDK builds still in the field behave exactly as before.
+      const ax = pointerCoord(a, 'x')
+      const ay = pointerCoord(a, 'y')
+      const bx = pointerCoord(b, 'x')
+      const by = pointerCoord(b, 'y')
+      if (ax !== null && ay !== null && bx !== null && by !== null) {
+        if (Math.hypot(bx - ax, by - ay) > rule.proximityPx) continue
+      }
       out.push({
         sessionId: b.sessionId,
         elementId: b.elementId,

@@ -30,6 +30,7 @@ export default defineConfig({
           server,
           include: ['tests/**/*.test.ts'],
           exclude: [
+            'tests/sdk-click-coordinates.test.ts',
             'tests/sdk-dwell-attribution.test.ts',
             'tests/sdk-dwell-backend.test.ts',
             'tests/sdk-dwell-stretch-flow.test.ts',
@@ -46,6 +47,7 @@ export default defineConfig({
           setupFiles: ['./tests/sdk-dom-env.ts'],
           server,
           include: [
+            'tests/sdk-click-coordinates.test.ts',
             'tests/sdk-dwell-attribution.test.ts',
             'tests/sdk-dwell-backend.test.ts',
             'tests/sdk-dwell-stretch-flow.test.ts',
