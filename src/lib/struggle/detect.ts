@@ -156,6 +156,24 @@ function ts(e: RuntimeEvent): number {
   return Date.parse(e.ts)
 }
 
+/**
+ * The events that represent real activity after `time`.
+ *
+ * The SDK reports a DWELL heartbeat once a second while the user is quiet (see
+ * `src/sdk/index.ts`), so a session that navigated (or loaded) and then did
+ * nothing arrives as `[NAVIGATION, DWELL, DWELL, …]`. Those heartbeats are the
+ * evidence that time elapsed, not evidence that something happened: an idle
+ * rule that counts them as "further events" can never fire, because the only
+ * session shape that satisfies its elapsed-time gate (a later DWELL) is the one
+ * shape that fails its "nothing happened" gate. Only DWELL is passive -
+ * every other event type is produced by a user action or an app error - so the
+ * idle rules measure activity with this and take the elapsed time from the
+ * session's last event, heartbeat included.
+ */
+function activityAfter(sess: RuntimeEvent[], time: number): RuntimeEvent[] {
+  return sess.filter((e) => e.eventType !== 'DWELL' && ts(e) > time)
+}
+
 // ── rules ────────────────────────────────────────────────────────────────────
 
 function detectRageClicks(
@@ -609,8 +627,10 @@ function detectDeadEnd(events: RuntimeEvent[]): StruggleDetection[] {
     if (navs.length === 0) continue
     const lastNav = navs[navs.length - 1]!
     const navTime = ts(lastNav)
-    const eventsAfterNav = sess.filter((e) => ts(e) > navTime).length
-    if (eventsAfterNav === 0 && lastEventTime - navTime >= rule.idleMs) {
+    // "No further events" means no further *activity*: the quiet heartbeat is
+    // what proves the idle lasted (see `activityAfter`).
+    const activityAfterNav = activityAfter(sess, navTime)
+    if (activityAfterNav.length === 0 && lastEventTime - navTime >= rule.idleMs) {
       out.push({
         sessionId: lastNav.sessionId,
         elementId: null,
@@ -825,7 +845,9 @@ function detectIdleAfterLoad(events: RuntimeEvent[]): StruggleDetection[] {
       (e) => e.eventType === 'NAVIGATION' && e.meta?.trigger === 'initial',
     )
     if (!initial) continue
-    const after = sess.filter((e) => ts(e) > ts(initial))
+    // Same reasoning as DEAD_END: the quiet heartbeat proves the idle lasted
+    // but is not itself activity (see `activityAfter`).
+    const after = activityAfter(sess, ts(initial))
     const lastEventTime = Math.max(...sess.map(ts))
     if (after.length === 0 && lastEventTime - ts(initial) >= rule.idleMs) {
       out.push({
