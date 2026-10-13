@@ -462,6 +462,72 @@ describe('detectStruggles - help hunt', () => {
   })
 })
 
+// ─── Idle rules and the SDK's quiet heartbeat ────────────────────────────────
+//
+// The SDK reports a DWELL heartbeat once a second once the user has been quiet
+// for 10s (`src/sdk/index.ts`), so a session that navigated (or loaded) and
+// then did nothing arrives as `[NAVIGATION, DWELL, DWELL, …]`. Those heartbeats
+// are how the detector learns that time passed; they are not activity. Counting
+// them as "further events" made DEAD_END and IDLE_AFTER_LOAD unreachable: the
+// only session shape that satisfied the rule's elapsed-time gate (a later
+// DWELL) was the one shape that failed its "nothing happened" gate.
+
+function dwellHeartbeat(tsOffsetMs: number, ms: number): RuntimeEvent {
+  const e = makeEvent({ tsOffsetMs, eventType: 'DWELL', elementId: E1 })
+  e.meta = { ms, stretch: 'st_1' }
+  return e
+}
+
+describe('detectStruggles - dead end', () => {
+  it('fires when the last navigation is followed only by the quiet heartbeat', () => {
+    const events: RuntimeEvent[] = [
+      makeEvent({ tsOffsetMs: 0, eventType: 'NAVIGATION', route: '/pricing' }),
+      dwellHeartbeat(25_000, 25_000),
+    ]
+    const de = detectStruggles(events).filter((d) => d.type === 'DEAD_END')
+    expect(de.length).toBe(1)
+    expect(de[0]?.summary).toContain('/pricing')
+  })
+
+  it('does not fire when a real interaction follows the navigation', () => {
+    const events: RuntimeEvent[] = [
+      makeEvent({ tsOffsetMs: 0, eventType: 'NAVIGATION', route: '/pricing' }),
+      dwellHeartbeat(25_000, 25_000),
+      makeEvent({ tsOffsetMs: 25_500, eventType: 'CLICK', elementId: E1 }),
+    ]
+    expect(detectStruggles(events).filter((d) => d.type === 'DEAD_END').length).toBe(0)
+  })
+
+  it('does not fire while the navigation is the newest event observed', () => {
+    // A batch that ends on the navigation cannot prove the user idled on it -
+    // the app may simply not have sent anything yet.
+    const events: RuntimeEvent[] = [
+      makeEvent({ tsOffsetMs: 0, eventType: 'NAVIGATION', route: '/pricing' }),
+    ]
+    expect(detectStruggles(events).filter((d) => d.type === 'DEAD_END').length).toBe(0)
+  })
+})
+
+describe('detectStruggles - idle after load', () => {
+  it('fires when the initial load is followed only by the quiet heartbeat', () => {
+    const initial = makeEvent({ tsOffsetMs: 0, eventType: 'NAVIGATION', route: '/' })
+    initial.meta = { trigger: 'initial' }
+    const events: RuntimeEvent[] = [initial, dwellHeartbeat(20_000, 20_000)]
+    expect(detectStruggles(events).filter((d) => d.type === 'IDLE_AFTER_LOAD').length).toBe(1)
+  })
+
+  it('does not fire when any real event follows the load', () => {
+    const initial = makeEvent({ tsOffsetMs: 0, eventType: 'NAVIGATION', route: '/' })
+    initial.meta = { trigger: 'initial' }
+    const events: RuntimeEvent[] = [
+      initial,
+      dwellHeartbeat(20_000, 20_000),
+      makeEvent({ tsOffsetMs: 21_000, eventType: 'SCROLL' }),
+    ]
+    expect(detectStruggles(events).filter((d) => d.type === 'IDLE_AFTER_LOAD').length).toBe(0)
+  })
+})
+
 
 it('rage severity counts the burst and excludes unrelated earlier clicks', () => {
   const burst = [100000, 100500, 101000].map((tsOffsetMs) => makeEvent({ tsOffsetMs, elementId: E1 }))
