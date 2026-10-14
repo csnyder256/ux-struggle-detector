@@ -691,38 +691,63 @@ function detectHoverHunt(
   for (const sess of sessions.values()) {
     const hovers = sess.filter((e) => e.eventType === 'HOVER')
     if (hovers.length < rule.minHovers) continue
-    for (let i = rule.minHovers - 1; i < hovers.length; i++) {
-      const start = hovers[i - rule.minHovers + 1]!
-      const end = hovers[i]!
-      // Adapt minHovers: if this element typically gets 8 hovers before a
-      // click (e.g. a complex menu), don't fire HOVER_HUNT on the first 8.
-      let minHovers: number = rule.minHovers
-      const baseline = end.elementId ? ctx.baselines?.get(end.elementId) : undefined
-      if (
-        baseline?.p95HoversBeforeClick &&
-        baseline.sampleSize &&
-        baseline.sampleSize >= 10
-      ) {
-        minHovers = Math.max(rule.minHovers, Math.ceil(baseline.p95HoversBeforeClick * 1.5))
-        if (i < minHovers - 1) continue
-      }
-      if (ts(end) - ts(start) <= rule.windowMs) {
-        const followingClicks = sess.filter(
-          (e) => e.eventType === 'CLICK' && ts(e) > ts(start) && ts(e) < ts(end) + 500,
-        )
-        if (followingClicks.length === 0) {
-          out.push({
-            sessionId: end.sessionId,
-            elementId: end.elementId,
-            type: 'HOVER_HUNT',
-            severity: 0.4,
-            ts: end.ts,
-            summary: `${hovers.length} hovers without a click${minHovers !== rule.minHovers ? ` (adapted threshold: ${minHovers})` : ''}`,
-          })
-          break
-        }
+    // The densest run of hovers inside one windowMs span - the burst the rule
+    // exists to catch - and that burst's first and last hover. A sliding left
+    // pointer, so a hunt late in a long hover history is reachable; the cost
+    // is still linear (neither pointer moves backwards).
+    //
+    // The number the rule reports is this burst count, never the length of the
+    // whole session's hover list. The rule is "N hovers inside windowMs without
+    // a click", so a session with one six-hover hunt and forty unrelated hovers
+    // before it is a six-hover hunt - but reporting `hovers.length` claimed all
+    // forty-six hovers happened inside the window, and that claim travelled
+    // into the intervention's diagnostic summary, where it read as a
+    // forty-six-hover hunt that never happened.
+    let left = 0
+    let bestCount = 0
+    let bestStart = hovers[0]!
+    let bestEnd = hovers[0]!
+    for (let right = 0; right < hovers.length; right++) {
+      while (ts(hovers[right]!) - ts(hovers[left]!) > rule.windowMs) left++
+      const count = right - left + 1
+      if (count > bestCount) {
+        bestCount = count
+        bestStart = hovers[left]!
+        bestEnd = hovers[right]!
       }
     }
+    // Adapt minHovers: if this element typically gets 8 hovers before a click
+    // (e.g. a complex menu), don't fire HOVER_HUNT on the first 8. The baseline
+    // may only raise the bar, and it now actually raises it: the adapted number
+    // is compared against the measured burst, so an element whose history says
+    // "this much hovering is normal" is not flagged at the static threshold.
+    // (The comparison used to be pinned to a fixed `rule.minHovers`-wide group,
+    // so a larger adapted number skipped earlier groups without ever changing
+    // the count the rule demanded - the floor was documented but not enforced.)
+    let minHovers: number = rule.minHovers
+    const baseline = bestEnd.elementId ? ctx.baselines?.get(bestEnd.elementId) : undefined
+    if (
+      baseline?.p95HoversBeforeClick &&
+      baseline.sampleSize &&
+      baseline.sampleSize >= 10
+    ) {
+      minHovers = Math.max(rule.minHovers, Math.ceil(baseline.p95HoversBeforeClick * 1.5))
+    }
+    if (bestCount < minHovers) continue
+    // A click inside the burst (or just after it) means the user found what they
+    // wanted - the opposite of a hunt - so the burst is not reported.
+    const followingClicks = sess.filter(
+      (e) => e.eventType === 'CLICK' && ts(e) > ts(bestStart) && ts(e) < ts(bestEnd) + 500,
+    )
+    if (followingClicks.length > 0) continue
+    out.push({
+      sessionId: bestEnd.sessionId,
+      elementId: bestEnd.elementId,
+      type: 'HOVER_HUNT',
+      severity: 0.4,
+      ts: bestEnd.ts,
+      summary: `${bestCount} hovers without a click${minHovers !== rule.minHovers ? ` (adapted threshold: ${minHovers})` : ''}`,
+    })
   }
   return out
 }
