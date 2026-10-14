@@ -359,6 +359,73 @@ describe('detectStruggles - hover hunt', () => {
     ]
     expect(detectStruggles(events).some((d) => d.type === 'HOVER_HUNT')).toBe(false)
   })
+
+  it('reports the window burst, not the session total, when a hunt follows earlier hovers', () => {
+    // Ten hovers spread five seconds apart, then a six-hover hunt inside half a
+    // second. The rule saw six hovers in the window; the session holds sixteen.
+    const events: RuntimeEvent[] = []
+    for (let i = 0; i < 10; i++) {
+      events.push(makeEvent({ tsOffsetMs: i * 5000, eventType: 'HOVER', elementId: E1 }))
+    }
+    for (let i = 0; i < 6; i++) {
+      events.push(makeEvent({ tsOffsetMs: 50_000 + i * 100, eventType: 'HOVER', elementId: E1 }))
+    }
+    const hunt = detectStruggles(events).find((d) => d.type === 'HOVER_HUNT')
+    expect(hunt).toBeDefined()
+    expect(hunt?.summary).toBe('6 hovers without a click')
+  })
+
+  it('does not count unrelated earlier hovers toward the hunt', () => {
+    // Four hovers inside the window is below the static minimum of six, even
+    // though the session has ten hovers in total.
+    const events: RuntimeEvent[] = []
+    for (let i = 0; i < 6; i++) {
+      events.push(makeEvent({ tsOffsetMs: i * 5000, eventType: 'HOVER', elementId: E1 }))
+    }
+    for (let i = 0; i < 4; i++) {
+      events.push(makeEvent({ tsOffsetMs: 60_000 + i * 100, eventType: 'HOVER', elementId: E1 }))
+    }
+    expect(detectStruggles(events).some((d) => d.type === 'HOVER_HUNT')).toBe(false)
+  })
+})
+
+describe('detectStruggles - hover hunt adapts to per-element baseline', () => {
+  it('does NOT fire on a static-sized burst when the element normally takes that many hovers', () => {
+    // Element typically takes ~8 hovers before a click, so the bar rises to
+    // ceil(8 * 1.5) = 12. The session holds twelve hovers, but the densest
+    // window holds only the six-hover burst - below the adapted bar, even
+    // though a fixed six-hover group exists earlier in the list.
+    const baselines = new Map([[E1 as string, { p95HoversBeforeClick: 8, sampleSize: 30 }]])
+    const events: RuntimeEvent[] = []
+    for (let i = 0; i < 6; i++) {
+      events.push(makeEvent({ tsOffsetMs: i * 5000, eventType: 'HOVER', elementId: E1 }))
+    }
+    for (let i = 0; i < 6; i++) {
+      events.push(makeEvent({ tsOffsetMs: 30_000 + i * 100, eventType: 'HOVER', elementId: E1 }))
+    }
+    expect(detectStruggles(events, { baselines }).some((d) => d.type === 'HOVER_HUNT')).toBe(false)
+  })
+
+  it('fires once the window burst clears the adapted threshold', () => {
+    const baselines = new Map([[E1 as string, { p95HoversBeforeClick: 8, sampleSize: 30 }]])
+    const events: RuntimeEvent[] = []
+    for (let i = 0; i < 12; i++) {
+      events.push(makeEvent({ tsOffsetMs: i * 100, eventType: 'HOVER', elementId: E1 }))
+    }
+    const hunt = detectStruggles(events, { baselines }).find((d) => d.type === 'HOVER_HUNT')
+    expect(hunt).toBeDefined()
+    expect(hunt?.summary).toContain('adapted threshold: 12')
+    expect(hunt?.summary).toMatch(/^12 hovers without a click/)
+  })
+
+  it('falls back to the static threshold when the baseline sample is too small', () => {
+    const baselines = new Map([[E1 as string, { p95HoversBeforeClick: 8, sampleSize: 5 }]])
+    const events: RuntimeEvent[] = []
+    for (let i = 0; i < 6; i++) {
+      events.push(makeEvent({ tsOffsetMs: i * 100, eventType: 'HOVER', elementId: E1 }))
+    }
+    expect(detectStruggles(events, { baselines }).some((d) => d.type === 'HOVER_HUNT')).toBe(true)
+  })
 })
 
 describe('detectStruggles - long dwell', () => {
