@@ -470,3 +470,100 @@ it('rage severity counts the burst and excludes unrelated earlier clicks', () =>
   expect(rage.severity).toBe(0.5)
   expect(rage.summary).toMatch(/^3 clicks within /)
 })
+
+describe('detectStruggles - keyboard lost focus is about a field the user did not type into', () => {
+  // The event shapes below are the ones the real SDK emits; the typed-then-left
+  // shape was captured from a live SDK run (focus an input, dispatch one real
+  // `input` event, blur, let the clock settle) and is reproduced here as data.
+  function focusField(tsOffsetMs: number, ctx: RuntimeEvent['element']): RuntimeEvent {
+    const e = makeEvent({ tsOffsetMs, eventType: 'FOCUS', elementId: E1 })
+    e.element = ctx
+    return e
+  }
+  function blurField(tsOffsetMs: number, ctx: RuntimeEvent['element']): RuntimeEvent {
+    const e = makeEvent({ tsOffsetMs, eventType: 'BLUR', elementId: E1 })
+    e.element = ctx
+    return e
+  }
+
+  it('does not fire for a user who typed and then clicked away', () => {
+    // The SDK debounces INPUT_CHANGE by 300ms, so the real capture order is
+    // FOCUS, BLUR, INPUT_CHANGE - the typing is emitted after the blur. The
+    // blur's own element context reports what the user typed, so the detector
+    // has the evidence in hand: valueLength went 0 -> 1 and dirty flipped true.
+    const events = [
+      focusField(0, { touched: true, dirty: false, valueLength: 0 }),
+      blurField(100, { touched: true, dirty: true, valueLength: 1 }),
+      Object.assign(
+        makeEvent({ tsOffsetMs: 350, eventType: 'INPUT_CHANGE', elementId: E1 }),
+        { element: { touched: true, dirty: true, valueLength: 1 }, meta: { length: 1, delta: 1 } },
+      ),
+    ]
+    expect(detectStruggles(events).filter((d) => d.type === 'KEYBOARD_LOST_FOCUS').length).toBe(0)
+  })
+
+  it('does not fire for a window blur/focus pair (a tab switch)', () => {
+    // `win.blur` / `win.focus` emit BLUR / FOCUS with a null elementId and
+    // meta.target = 'window'. A tab switch is TAB_HOPPING's signal; it is not a
+    // field, so it must not produce "Click into the field again to type."
+    const w = (tsOffsetMs: number, eventType: 'FOCUS' | 'BLUR'): RuntimeEvent => {
+      const e = makeEvent({ tsOffsetMs, eventType })
+      e.meta = { target: 'window' }
+      return e
+    }
+    const events = [w(0, 'BLUR'), w(200, 'FOCUS'), w(400, 'BLUR'), w(600, 'FOCUS')]
+    const out = detectStruggles(events)
+    expect(out.filter((d) => d.type === 'KEYBOARD_LOST_FOCUS').length).toBe(0)
+    // The tab switch is still reported by the rule that owns it.
+    expect(out.some((d) => d.type === 'TAB_HOPPING')).toBe(true)
+  })
+
+  it('does not fire when the focus landed on a button, not a field', () => {
+    // Clicking a button focuses it; clicking the next control blurs it inside
+    // the window. The SDK's element context for a button has no `touched` and
+    // no `valueLength` - there is no field here to lose focus of.
+    const btn = (tsOffsetMs: number, eventType: 'FOCUS' | 'BLUR'): RuntimeEvent => {
+      const e = makeEvent({ tsOffsetMs, eventType, elementId: E1 })
+      e.element = { label: 'Save', role: 'SUBMIT' }
+      return e
+    }
+    expect(
+      detectStruggles([btn(0, 'FOCUS'), btn(200, 'BLUR')]).filter(
+        (d) => d.type === 'KEYBOARD_LOST_FOCUS',
+      ).length,
+    ).toBe(0)
+  })
+
+  it('still fires for a field that was focused and left without typing', () => {
+    const events = [
+      focusField(0, { touched: true, dirty: false, valueLength: 0 }),
+      blurField(200, { touched: true, dirty: false, valueLength: 0 }),
+    ]
+    const hits = detectStruggles(events).filter((d) => d.type === 'KEYBOARD_LOST_FOCUS')
+    expect(hits.length).toBe(1)
+    expect(hits[0]?.elementId).toBe(E1)
+  })
+
+  it('still fires when the batch carries no element context at all', () => {
+    // A batch from an SDK build older than the element context: no evidence of
+    // typing is available, so the previous reading stands rather than the rule
+    // going silent for those installs.
+    const events = [
+      makeEvent({ tsOffsetMs: 0, eventType: 'FOCUS', elementId: E1 }),
+      makeEvent({ tsOffsetMs: 200, eventType: 'BLUR', elementId: E1 }),
+    ]
+    expect(detectStruggles(events).filter((d) => d.type === 'KEYBOARD_LOST_FOCUS').length).toBe(1)
+  })
+
+  it('does not fire when the debounced input arrives just after the blur', () => {
+    // Same typed-then-left flow with no element context to compare, so the only
+    // evidence is the INPUT_CHANGE itself - which the SDK emits inside the
+    // 300ms debounce lag after the blur it belongs to.
+    const events = [
+      makeEvent({ tsOffsetMs: 0, eventType: 'FOCUS', elementId: E1 }),
+      makeEvent({ tsOffsetMs: 100, eventType: 'BLUR', elementId: E1 }),
+      makeEvent({ tsOffsetMs: 350, eventType: 'INPUT_CHANGE', elementId: E1 }),
+    ]
+    expect(detectStruggles(events).filter((d) => d.type === 'KEYBOARD_LOST_FOCUS').length).toBe(0)
+  })
+})

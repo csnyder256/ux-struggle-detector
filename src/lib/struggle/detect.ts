@@ -1126,29 +1126,100 @@ function detectLockedOut(events: RuntimeEvent[]): StruggleDetection[] {
   return out
 }
 
+/**
+ * The SDK debounces INPUT_CHANGE by 300ms (`src/sdk/index.ts`), so a fast
+ * focus → type → click-away emits FOCUS, BLUR and only then INPUT_CHANGE: the
+ * typing lands *after* the blur it belongs to. Anything reading that stretch has
+ * to allow for the lag, or it reports a user who typed as one who did not.
+ */
+const INPUT_CHANGE_DEBOUNCE_MS = 300
+
+/**
+ * Did the user type into this field while it was focused?
+ *
+ * FOCUS and BLUR each carry the field's element context, and the SDK fills
+ * `valueLength` / `dirty` on both, so comparing the two is direct evidence of
+ * what happened in between rather than a guess from timing: a field whose
+ * reported length changed, or whose `dirty` flipped to true, was typed in.
+ * Events with no element context (an SDK build older than the context) carry no
+ * such evidence and are covered by the debounced-INPUT_CHANGE check instead.
+ */
+function typedWhileFocused(focus: RuntimeEvent, blur: RuntimeEvent): boolean {
+  const before = focus.element
+  const after = blur.element
+  if (!before || !after) return false
+  const beforeLen = typeof before.valueLength === 'number' ? before.valueLength : null
+  const afterLen = typeof after.valueLength === 'number' ? after.valueLength : null
+  if (beforeLen !== null && afterLen !== null && afterLen !== beforeLen) return true
+  return before.dirty === false && after.dirty === true
+}
+
+/**
+ * Is this event about a form field at all? The SDK marks input / textarea /
+ * select with `touched` and sends their `valueLength`; a button or link that
+ * took focus from a click carries neither. Only consulted when the event
+ * actually has element context, so a batch from an SDK build that predates the
+ * context keeps the previous reading instead of being silently dropped.
+ */
+function looksLikeFormField(e: RuntimeEvent): boolean {
+  if (!e.element) return true
+  return e.element.touched === true || typeof e.element.valueLength === 'number'
+}
+
+/**
+ * FOCUS → BLUR within 500ms on a *field* the user never typed into.
+ *
+ * The rule is about a field, and about the absence of typing. Two things made it
+ * fire on users who were fine, each rendering the "Click into the field again to
+ * type." tooltip:
+ *
+ * 1. A window focus is not a field. `win.focus` / `win.blur` emit FOCUS / BLUR
+ *    with a null elementId and `meta.target = 'window'` (`src/sdk/index.ts`), so
+ *    switching tabs and back produced a KEYBOARD_LOST_FOCUS with no element at
+ *    all - a struggle attributed to nothing, advising the user about a field
+ *    that does not exist. Tab switches are TAB_HOPPING's rule, not this one.
+ * 2. Typing the rule could not see. INPUT_CHANGE is debounced, so a fast
+ *    focus → type → click-away arrives as FOCUS, BLUR, INPUT_CHANGE - and a
+ *    detector looking only for an INPUT_CHANGE *between* the two sees a user who
+ *    never typed. The blur's own element context already says otherwise.
+ *
+ * (The `between` scan this replaces could never fire: `b` is the *first*
+ * same-element event after the focus and the session is ts-sorted, so no event
+ * with that elementId could also sort before it. It was a no-op guard, not a
+ * working check.)
+ */
 function detectKeyboardLostFocus(events: RuntimeEvent[]): StruggleDetection[] {
-  // FOCUS → BLUR within < 500ms with no INPUT_CHANGE in between, on an input.
   const out: StruggleDetection[] = []
   const sessions = bySession(events)
   for (const sess of sessions.values()) {
     for (let i = 0; i < sess.length - 1; i++) {
       const a = sess[i]!
       if (a.eventType !== 'FOCUS') continue
+      // A window focus is a tab switch, not a field.
+      if (a.elementId === null || a.meta?.target === 'window') continue
       const b = sess.slice(i + 1).find((e) => e.elementId === a.elementId)
       if (!b || b.eventType !== 'BLUR') continue
-      const between = sess
-        .slice(i + 1)
-        .filter((e) => e === b ? false : e.elementId === a.elementId && ts(e) < ts(b))
-      if (between.length === 0 && ts(b) - ts(a) < 500) {
-        out.push({
-          sessionId: a.sessionId,
-          elementId: a.elementId,
-          type: 'KEYBOARD_LOST_FOCUS',
-          severity: 0.3,
-          ts: a.ts,
-          summary: 'Focused, then lost focus before typing',
-        })
-      }
+      if (ts(b) - ts(a) >= 500) continue
+      if (!looksLikeFormField(a)) continue
+      if (typedWhileFocused(a, b)) continue
+      // Typing that arrived late: the debounced INPUT_CHANGE can be emitted just
+      // after the blur it belongs to, still inside the debounce lag.
+      const typedLate = sess.some(
+        (e) =>
+          e.elementId === a.elementId &&
+          e.eventType === 'INPUT_CHANGE' &&
+          ts(e) >= ts(b) &&
+          ts(e) <= ts(b) + INPUT_CHANGE_DEBOUNCE_MS,
+      )
+      if (typedLate) continue
+      out.push({
+        sessionId: a.sessionId,
+        elementId: a.elementId,
+        type: 'KEYBOARD_LOST_FOCUS',
+        severity: 0.3,
+        ts: a.ts,
+        summary: 'Focused, then lost focus before typing',
+      })
     }
   }
   return out
