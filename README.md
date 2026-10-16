@@ -255,6 +255,7 @@ Run `pnpm test` for the current test inventory. The suite covers unit logic, SDK
 | `baselines-dwell-grouping.test.ts` | dwell p95 weighted per quiet stretch, not per heartbeat row |
 | `sdk-validity-flow.test.ts` | runtime `setCustomValidity` capture through ingest into rendered copy |
 | `browser-evidence.test.ts` | real headless Chromium: browser constraint API, SDK capture, ingest and dispatcher |
+| `sdk-dead-click-dwell.test.ts` | DEAD_CLICK's declared dwell gate, driven by real SDK click/navigation events through the dispatcher |
 
 The SDK DOM suites run against a live jsdom document, which is a DOM implementation, not a browser. jsdom implements `setCustomValidity` and the constraint API well enough to drive the SDK's real code path, but it does **not** compute `badInput`, and it is not proof of browser behaviour. `sdk-validity-flow.test.ts` therefore mocks the `badInput` validity state (installing both `validity` and `checkValidity` so the two agree) and says so in the test; the real-browser observation is recorded separately in `docs/browser-evidence.md`, captured with headless Chromium against the built SDK.
 
@@ -262,7 +263,7 @@ Coverage is concentrated on the pure, high-risk core: detection rules, dispatche
 
 **What is not covered:** there is no integration test that exercises `/api/events` end to end against a real database, the Chromium test uses an ingest fixture rather than a real database, and the dashboard's React pages are untested.
 
-CI (`.github/workflows/ci.yml`) runs on push to main and on every PR: Node 22 and pnpm 10 with a cached store, then `prisma generate`, `typecheck`, `lint`, `test`, both SDK bundles (failing if the checked-in copies are stale), and a production `pnpm build`. There is no Postgres service container, the browser flow uses an ingest fixture.
+CI (`.github/workflows/ci.yml`) runs on push to main and on every PR: Node 22 and pnpm 10 with a cached store, then `prisma generate`, `typecheck`, `lint`, `test`, the SDK bundles plus the installable package and the guided demo (failing if the checked-in `public/sdk.js`, `public/sdk.min.js` or `public/demo/demo.js` are stale), `sdk:verify`, a real Chromium run of the demo (`demo:verify`), and a production `pnpm build`. There is no Postgres service container, the browser flow uses an ingest fixture.
 
 ## Status
 

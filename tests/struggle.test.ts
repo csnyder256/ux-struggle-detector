@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { detectStruggles } from '@/lib/struggle/detect'
-import { EVENT_SCHEMA_VERSION, type RuntimeEvent } from '@/lib/types/events'
+import { EVENT_SCHEMA_VERSION, DEFAULT_STRUGGLE_RULES, type RuntimeEvent } from '@/lib/types/events'
 import type { ElementId } from '@/lib/types/ui-map'
 
 const E1 = 'sh_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as ElementId
@@ -247,11 +247,75 @@ describe('detectStruggles - empty input', () => {
 // ─── New rule coverage ───────────────────────────────────────────────────────
 
 describe('detectStruggles - dead click', () => {
-  it('fires when SDK marks meta.dead = true', () => {
-    const e = makeEvent({ tsOffsetMs: 0, eventType: 'CLICK', elementId: E1 })
+  const dwellMs = DEFAULT_STRUGGLE_RULES.deadClick.dwellMs
+  const deadClick = (tsOffsetMs: number, elementId: ElementId = E1): RuntimeEvent => {
+    const e = makeEvent({ tsOffsetMs, eventType: 'CLICK', elementId })
     e.meta = { dead: true }
-    const r = detectStruggles([e])
+    return e
+  }
+
+  it('fires once the dead click has been followed by the declared dwell with no navigation', () => {
+    const events: RuntimeEvent[] = [
+      deadClick(0),
+      // The user is still on the page, doing something else, past the window.
+      makeEvent({ tsOffsetMs: dwellMs + 500, eventType: 'CLICK', elementId: E2 }),
+    ]
+    const r = detectStruggles(events)
     expect(r.find((d) => d.type === 'DEAD_CLICK')?.elementId).toBe(E1)
+  })
+
+  it('does not fire on the click alone, before the dwell has elapsed', () => {
+    // The rule needs the dwell as evidence. A batch that ends at the click has
+    // not observed it yet - firing here is what made every click on a
+    // decorative element a struggle.
+    expect(detectStruggles([deadClick(0)]).some((d) => d.type === 'DEAD_CLICK')).toBe(false)
+  })
+
+  it('does not fire when the user navigates away inside the dwell window', () => {
+    const events: RuntimeEvent[] = [
+      deadClick(0),
+      makeEvent({ tsOffsetMs: 200, eventType: 'NAVIGATION', route: '/next' }),
+      makeEvent({ tsOffsetMs: dwellMs + 1000, eventType: 'CLICK', elementId: E2 }),
+    ]
+    expect(detectStruggles(events).some((d) => d.type === 'DEAD_CLICK')).toBe(false)
+  })
+
+  it('still fires when the navigation arrives only after the dwell window', () => {
+    // Dwelled on the page, then left: the declared rule is satisfied.
+    const events: RuntimeEvent[] = [
+      deadClick(0),
+      makeEvent({ tsOffsetMs: dwellMs + 1, eventType: 'NAVIGATION', route: '/next' }),
+    ]
+    expect(detectStruggles(events).some((d) => d.type === 'DEAD_CLICK')).toBe(true)
+  })
+
+  it('accepts the SDK quiet heartbeat as evidence that the dwell elapsed', () => {
+    // The SDK reports a DWELL heartbeat while the user is quiet; it is proof
+    // that time passed, not an action. See the idle-rule coverage above.
+    const events: RuntimeEvent[] = [
+      deadClick(0),
+      makeEvent({ tsOffsetMs: 1000, eventType: 'DWELL' }),
+      makeEvent({ tsOffsetMs: dwellMs + 2000, eventType: 'DWELL' }),
+    ]
+    expect(detectStruggles(events).some((d) => d.type === 'DEAD_CLICK')).toBe(true)
+  })
+
+  it('reads the marker from element.dead as well as meta.dead', () => {
+    const e = makeEvent({ tsOffsetMs: 0, eventType: 'CLICK', elementId: E1 })
+    e.element = { dead: true }
+    const events: RuntimeEvent[] = [
+      e,
+      makeEvent({ tsOffsetMs: dwellMs + 500, eventType: 'CLICK', elementId: E2 }),
+    ]
+    expect(detectStruggles(events).some((d) => d.type === 'DEAD_CLICK')).toBe(true)
+  })
+
+  it('does not fire for a click the SDK did not mark dead', () => {
+    const events: RuntimeEvent[] = [
+      makeEvent({ tsOffsetMs: 0, eventType: 'CLICK', elementId: E1 }),
+      makeEvent({ tsOffsetMs: dwellMs + 500, eventType: 'CLICK', elementId: E2 }),
+    ]
+    expect(detectStruggles(events).some((d) => d.type === 'DEAD_CLICK')).toBe(false)
   })
 })
 

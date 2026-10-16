@@ -256,19 +256,49 @@ function detectInvalidClicks(events: RuntimeEvent[]): StruggleDetection[] {
 }
 
 function detectDeadClicks(events: RuntimeEvent[]): StruggleDetection[] {
-  // Click on an element with no handler → SDK marks meta.dead = true.
+  // Click on an element with no handler → SDK marks it `dead` (see
+  // `hasHandler` in `src/sdk/index.ts`), which is a wide net: a decorative
+  // card, an image, a chart, or empty page space all have no handler and are
+  // all marked. The declared rule (DEFAULT_STRUGGLE_RULES.deadClick) does not
+  // fire on the marker alone - it requires the user to *dwell* on the page for
+  // `dwellMs` afterwards with no navigation. That gate was never implemented:
+  // the threshold was dead code, so every click on anything non-interactive
+  // dispatched the "That's not clickable - try the highlighted control
+  // instead" tooltip at high confidence, including when the user had already
+  // navigated away from the element the tooltip anchors to.
+  const rule = DEFAULT_STRUGGLE_RULES.deadClick
   const out: StruggleDetection[] = []
-  for (const e of events) {
-    if (e.eventType !== 'CLICK') continue
-    if (e.element?.dead !== true && e.meta?.dead !== true) continue
-    out.push({
-      sessionId: e.sessionId,
-      elementId: e.elementId,
-      type: 'DEAD_CLICK',
-      severity: 0.6,
-      ts: e.ts,
-      summary: 'Clicked a non-interactive element',
-    })
+  const sessions = bySession(events)
+  for (const sess of sessions.values()) {
+    if (sess.length === 0) continue
+    // The session's last event is the evidence that time elapsed - the SDK's
+    // quiet DWELL heartbeat counts, exactly as it does for the idle rules.
+    const lastEventTime = Math.max(...sess.map(ts))
+    for (const e of sess) {
+      if (e.eventType !== 'CLICK') continue
+      if (e.element?.dead !== true && e.meta?.dead !== true) continue
+      const clickTime = ts(e)
+      // Nothing has established that the dwell happened yet: a batch that ends
+      // at the click itself is not a struggle, it is an unfinished observation.
+      if (lastEventTime - clickTime < rule.dwellMs) continue
+      // ...and the user must still be on this page at the end of that window.
+      // A click-and-leave is not "stuck on this control".
+      const navigatedAway = sess.some(
+        (n) =>
+          n.eventType === 'NAVIGATION' &&
+          ts(n) > clickTime &&
+          ts(n) - clickTime <= rule.dwellMs,
+      )
+      if (navigatedAway) continue
+      out.push({
+        sessionId: e.sessionId,
+        elementId: e.elementId,
+        type: 'DEAD_CLICK',
+        severity: 0.6,
+        ts: e.ts,
+        summary: 'Clicked a non-interactive element',
+      })
+    }
   }
   return out
 }
