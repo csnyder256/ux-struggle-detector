@@ -25,7 +25,7 @@ import { dispatchInterventions } from '@/lib/interventions/dispatcher'
 import { RuntimeEventSchemaExport as RuntimeEventSchema } from '@/lib/ingest/schema'
 import type { StruggleDetection, RuntimeEvent } from '@/lib/types/events'
 import type { ElementId } from '@/lib/types/ui-map'
-import { installDom, eventsOf, moveMouse, tick, bootSdk, click } from './helpers/sdk-dom'
+import { installDom, eventsOf, moveMouse, tick, bootSdk, click, detect } from './helpers/sdk-dom'
 
 const E1 = 'sh_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as ElementId
 
@@ -303,4 +303,54 @@ it('keeps runtime validation messages isolated by session', () => {
   expect(results[0]!.copy).toContain('First session message')
   expect(results[0]!.copy).not.toContain('Second session message')
   expect(results[1]!.copy).toContain('Second session message')
+})
+
+it('a number field that rejected the typed text reaches the user, not just the event stream', async () => {
+  // The whole chain, driven by the real SDK: the browser raises `badInput`, the
+  // SDK captures it off the live element, the server detector classifies it,
+  // and the copy names the reason. Before the flag was classified this failure
+  // produced no detection at all, so no intervention could reach the user; and
+  // a bare `type="number"` (no min/max) has nothing for the markup-derived copy
+  // to describe either, so the template rendered the bare "Quantity .".
+  const run = await bootSdk('<form><input id="qty" name="qty" type="number"></form>')
+  try {
+    const input = run.doc.getElementById('qty') as HTMLInputElement
+    // jsdom does not compute `badInput`, so install the validity state AND the
+    // matching `checkValidity()` result, as the capture test above does. This
+    // pins the classification, not that a browser raises the flag.
+    Object.defineProperty(input, 'validity', {
+      value: { badInput: true, valid: false },
+      configurable: true,
+    })
+    Object.defineProperty(input, 'checkValidity', { value: () => false, configurable: true })
+
+    input.focus()
+    click(input)
+    await settleUntil(run, (e) => Boolean(e.element?.validity))
+
+    const failure = run.events.filter((e) => e.element?.validity).pop()
+    expect(failure, 'the SDK reports the failing field').toBeDefined()
+    expect(failure!.element?.validity).toContain('badInput')
+    expect(
+      failure!.element?.validationMessage,
+      'a bare badInput carries no message from the page',
+    ).toBeUndefined()
+
+    const detected = detect(run.events).find((d) => d.type === 'FORMAT_ERROR')
+    expect(detected, 'badInput is a format failure the detector must report').toBeDefined()
+    expect(detected!.elementId).toBe(failure!.elementId)
+
+    const elementId = detected!.elementId as string
+    const dispatched = dispatchInterventions([detected!], {
+      safeMode: false,
+      elementLabels: new Map([[elementId, 'Quantity']]),
+      runtimeValidityByElement: new Map([
+        [failure!.sessionId, new Map([[elementId, failure!.element!.validity as string]])],
+      ]),
+    })
+    expect(dispatched).toHaveLength(1)
+    expect(dispatched[0]!.copy).toBe('Quantity needs a number.')
+  } finally {
+    run.stop()
+  }
 })

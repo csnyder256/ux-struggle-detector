@@ -896,3 +896,70 @@ describe('organization-scoped feedback', () => {
     expect(pickVariantBanditForTest('s', 'LOOP', E1, 2, stats, 0, 30, () => 0.5, 'org-b')).toBe(1)
   })
 })
+
+describe('the copy names a failure no parser could see', () => {
+  // `runtimeValidityByElement` is the ValidityState flag list the SDK captured
+  // off the failing element. A parser cannot produce these - `badInput` and
+  // `customError` are raised by the browser at runtime - so without them a
+  // field whose only failure is one of those had nothing to say about itself
+  // and the FORMAT_ERROR template rendered "{label} .".
+  function copyWithFlags(
+    flags: string | undefined,
+    opts: { validation?: Record<string, unknown>; message?: string } = {},
+  ): string {
+    const out = dispatchInterventions([det('FORMAT_ERROR')], {
+      safeMode: false,
+      elementLabels: new Map([[E1 as string, 'Quantity']]),
+      elementValidation: opts.validation
+        ? new Map([[E1 as string, opts.validation]])
+        : undefined,
+      runtimeValidityByElement: flags
+        ? new Map([['sess_1', new Map([[E1 as string, flags]])]])
+        : undefined,
+      validationMessageByElement: opts.message
+        ? new Map([['sess_1', new Map([[E1 as string, opts.message]])]])
+        : undefined,
+    })
+    return out[0]?.copy ?? ''
+  }
+
+  it('names a number field that rejected the typed text', () => {
+    expect(copyWithFlags('badInput')).toBe('Quantity needs a number.')
+  })
+
+  it('names a custom validity failure when the page left no message', () => {
+    expect(copyWithFlags('customError')).toBe('Quantity needs a valid value.')
+  })
+
+  it('lets the message the page wrote win over the flag description', () => {
+    expect(
+      copyWithFlags('customError', { message: 'That is a card number, not a VAT ID.' }),
+    ).toBe('Quantity That is a card number, not a VAT ID.')
+  })
+
+  it('keeps the markup description instead of stacking the flag on top of it', () => {
+    // The customer's own attributes name the constraint in their terms; adding
+    // the flag's coarser phrasing would read "needs valid email, a valid format".
+    expect(copyWithFlags('typeMismatch', { validation: { inputType: 'email' } })).toBe(
+      'Quantity needs valid email.',
+    )
+    expect(copyWithFlags('badInput', { validation: { inputType: 'number', min: 1 } })).toBe(
+      'Quantity needs at least 1.',
+    )
+  })
+
+  it('ignores a flag it cannot describe rather than guessing a sentence', () => {
+    expect(copyWithFlags('someFutureFlag')).toBe('Quantity .')
+  })
+
+  it('reads the flags only for the rule that reports a format failure', () => {
+    // A REQUIRED_MISSED on a field that also happens to be mid-format-failure
+    // is about the missing value, not the format.
+    const out = dispatchInterventions([det('REQUIRED_MISSED')], {
+      safeMode: false,
+      elementLabels: new Map([[E1 as string, 'Quantity']]),
+      runtimeValidityByElement: new Map([['sess_1', new Map([[E1 as string, 'badInput']])]]),
+    })
+    expect(out[0]?.copy).toBe('Quantity .')
+  })
+})

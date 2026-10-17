@@ -470,3 +470,43 @@ it('rage severity counts the burst and excludes unrelated earlier clicks', () =>
   expect(rage.severity).toBe(0.5)
   expect(rage.summary).toMatch(/^3 clicks within /)
 })
+
+describe('detectStruggles - format failures the browser raises at runtime', () => {
+  // `element.validity` is the comma-joined ValidityState flag list the SDK
+  // captures off the live element. It is the only carrier for these: they are
+  // runtime state a page produces by calling browser APIs, not attributes in a
+  // source file, so no parser can put them in the static map.
+  function withValidity(validity: string): RuntimeEvent[] {
+    const e = makeEvent({ tsOffsetMs: 0, eventType: 'INPUT_CHANGE', elementId: E1 })
+    e.element = { validity, touched: true, dirty: true, valueLength: 3 }
+    return [e]
+  }
+
+  it('fires for a value the field could not parse (badInput)', () => {
+    const fmt = detectStruggles(withValidity('badInput')).filter((d) => d.type === 'FORMAT_ERROR')
+    expect(fmt.length).toBe(1)
+    expect(fmt[0]?.elementId).toBe(E1)
+    expect(fmt[0]?.summary).toContain('badInput')
+  })
+
+  it('fires for a message the page set on the field (customError)', () => {
+    const fmt = detectStruggles(withValidity('customError')).filter((d) => d.type === 'FORMAT_ERROR')
+    expect(fmt.length).toBe(1)
+    expect(fmt[0]?.summary).toContain('customError')
+  })
+
+  it('reports a missing value as REQUIRED_MISSED, never as a format error', () => {
+    const r = detectStruggles(withValidity('valueMissing'))
+    expect(r.some((d) => d.type === 'REQUIRED_MISSED')).toBe(true)
+    expect(r.some((d) => d.type === 'FORMAT_ERROR')).toBe(false)
+  })
+
+  it('reports both when a field is missing a value AND unparseable', () => {
+    const types = detectStruggles(withValidity('valueMissing,badInput')).map((d) => d.type)
+    expect(types.sort()).toEqual(['FORMAT_ERROR', 'REQUIRED_MISSED'])
+  })
+
+  it('does not invent a detection for a flag it does not understand', () => {
+    expect(detectStruggles(withValidity('someFutureFlag'))).toEqual([])
+  })
+})

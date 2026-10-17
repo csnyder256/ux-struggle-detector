@@ -78,6 +78,17 @@ export interface DispatchContext {
    * that string and drops it on reload, so this is the only copy available.
    */
   validationMessageByElement?: Map<string, Map<string, string>>
+  /**
+   * Map sessionId → elementId → the browser `ValidityState` flags the failing
+   * event carried, comma-joined (`badInput`, `customError`, `rangeUnderflow`…).
+   *
+   * The static map holds what a parser could read out of markup. The flags a
+   * live element raises are not in markup, so a field whose only failure is
+   * `badInput` described itself as needing nothing and `{validation}` rendered
+   * empty - the user saw "Tax ID ." for a number field that rejected their
+   * text. These flags let the copy name the real reason ('a number') instead.
+   */
+  runtimeValidityByElement?: Map<string, Map<string, string>>
   /** Map elementId → semantic role (SUBMIT / DANGER / etc.). */
   elementRoles?: Map<string, string>
   /** When true (default in first 7 days post-install), no interventions render. */
@@ -231,8 +242,17 @@ export function dispatchInterventionsWithRows(
     // the failing field, then any capture for this element.
     const runtimeValidityMessage =
       (det.elementId ? ctx.validationMessageByElement?.get(det.sessionId)?.get(det.elementId) : null) ?? null
+    // The flags the live element raised travelled on the event, not in the
+    // static map - `badInput` and `customError` exist only there. They explain
+    // a *format* failure, so only the rule that reports one reads them: a
+    // REQUIRED_MISSED on a field that also happens to be mid-format-failure is
+    // about the missing value, not the format.
+    const runtimeValidity =
+      det.type === 'FORMAT_ERROR' && det.elementId
+        ? ctx.runtimeValidityByElement?.get(det.sessionId)?.get(det.elementId)
+        : undefined
     const validationHint = asSentenceFragment(
-      describeValidation(validation, runtimeValidityMessage),
+      validationDescription(validation, runtimeValidityMessage, runtimeValidity),
     )
     const rsem = sessRoute ? ctx.routeSemantic?.get(sessRoute) : undefined
     const routePurpose = rsem?.purpose ?? ''
@@ -475,6 +495,68 @@ function describeValidation(
   // "a valid format" do not read as "needs a valid format, a valid format".
   const unique = Array.from(new Set(parts))
   return unique.length > 0 ? `needs ${unique.join(', ')}` : ''
+}
+
+/**
+ * The `ValidityState` flags `describeValidation` knows how to put into words.
+ * A flag outside this set is not silently rewritten into a generic sentence -
+ * guessing a description for a failure we do not understand is how copy starts
+ * claiming things the field never said.
+ */
+const DESCRIBABLE_VALIDITY_FLAGS = new Set([
+  'customError',
+  'tooShort',
+  'tooLong',
+  'typeMismatch',
+  'patternMismatch',
+  'badInput',
+  'rangeUnderflow',
+  'rangeOverflow',
+  'stepMismatch',
+])
+
+/**
+ * Fold the browser flags the failing event carried into the rules a parser
+ * read from markup.
+ *
+ * The two sources are complementary and neither is complete on its own: the
+ * static map knows the attributes (`type`, `min`, `max`, `pattern`) but no
+ * runtime state, and the event knows what a live element raised but no
+ * attributes. `badInput` and `customError` exist ONLY on the runtime side -
+ * they are raised by the browser's editing pipeline and by
+ * `setCustomValidity()`, so no parser can see them - which is why a number
+ * field that rejected the typed text had nothing to say about itself.
+ */
+function withRuntimeValidity(
+  v: ValidationLite | undefined,
+  flags: string | undefined,
+): ValidationLite | undefined {
+  const list =
+    typeof flags === 'string' ? flags.split(',').map((f) => f.trim()).filter(Boolean) : []
+  const known = list.filter((f) => DESCRIBABLE_VALIDITY_FLAGS.has(f))
+  if (known.length === 0) return v
+  const merged: ValidationLite = { ...(v ?? {}) }
+  for (const flag of known) (merged as Record<string, unknown>)[flag] = true
+  return merged
+}
+
+/**
+ * The `{validation}` hint for one element, from both sources.
+ *
+ * Markup wins when it has something to say: the customer's own attributes name
+ * the constraint in their terms ("at least 18", "valid email"), and adding the
+ * runtime flag's coarser phrasing on top would read "needs valid email, a valid
+ * format" for one failure. The flags speak only when the static rules say
+ * nothing - which is exactly the case they were captured for.
+ */
+function validationDescription(
+  v: ValidationLite | undefined,
+  runtimeMessage: string | null | undefined,
+  runtimeFlags: string | undefined,
+): string {
+  const fromMarkup = describeValidation(v, runtimeMessage)
+  if (fromMarkup) return fromMarkup
+  return describeValidation(withRuntimeValidity(v, runtimeFlags), runtimeMessage)
 }
 
 /**

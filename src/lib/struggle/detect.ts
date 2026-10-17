@@ -444,7 +444,36 @@ function detectRequiredMissed(events: RuntimeEvent[]): StruggleDetection[] {
   return out
 }
 
-const FORMAT_FLAGS = ['typeMismatch', 'patternMismatch', 'tooShort', 'tooLong', 'rangeUnderflow', 'rangeOverflow', 'stepMismatch']
+/**
+ * The browser `ValidityState` flags that describe a *format* failure - the
+ * value is there, but it is not something the field can accept. The SDK
+ * captures these off the live element and ships them as `element.validity`
+ * (comma-joined), which is the only way they reach the server: they are
+ * runtime state a page produces by calling browser APIs, not attributes in a
+ * source file, so no parser can read them.
+ *
+ * `badInput` and `customError` belong here. Both are real, browser-raised
+ * failures - `badInput` is what a number field reports when the typed text is
+ * not a number at all, and `customError` is what `setCustomValidity()` raises -
+ * and the dispatcher already has copy for each ('a number', 'a valid value').
+ * Leaving them out of this list meant the two failures the SDK went to the
+ * trouble of capturing produced no detection at all, so no intervention could
+ * ever name them.
+ *
+ * `valueMissing` is deliberately NOT here: that is REQUIRED_MISSED, not a
+ * format failure, and it has its own rule above.
+ */
+const FORMAT_FLAGS = [
+  'typeMismatch',
+  'patternMismatch',
+  'tooShort',
+  'tooLong',
+  'rangeUnderflow',
+  'rangeOverflow',
+  'stepMismatch',
+  'badInput',
+  'customError',
+]
 
 function detectFormatError(events: RuntimeEvent[]): StruggleDetection[] {
   const out: StruggleDetection[] = []
