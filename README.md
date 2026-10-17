@@ -253,7 +253,7 @@ Run `pnpm test` for the current test inventory. The suite covers unit logic, SDK
 | `sdk-dwell-backend.test.ts` | SDK dwell timer driven against a real DOM, its events fed to the real detector |
 | `sdk-dwell-stretch-flow.test.ts` | SDK stretch identity through the wire schema into the real baseline grouping |
 | `baselines-dwell-grouping.test.ts` | dwell p95 weighted per quiet stretch, not per heartbeat row |
-| `sdk-validity-flow.test.ts` | runtime `setCustomValidity` capture through ingest into rendered copy |
+| `sdk-validity-flow.test.ts` | runtime `setCustomValidity`/`badInput` capture through the detector into rendered copy |
 | `browser-evidence.test.ts` | real headless Chromium: browser constraint API, SDK capture, ingest and dispatcher |
 
 The SDK DOM suites run against a live jsdom document, which is a DOM implementation, not a browser. jsdom implements `setCustomValidity` and the constraint API well enough to drive the SDK's real code path, but it does **not** compute `badInput`, and it is not proof of browser behaviour. `sdk-validity-flow.test.ts` therefore mocks the `badInput` validity state (installing both `validity` and `checkValidity` so the two agree) and says so in the test; the real-browser observation is recorded separately in `docs/browser-evidence.md`, captured with headless Chromium against the built SDK.

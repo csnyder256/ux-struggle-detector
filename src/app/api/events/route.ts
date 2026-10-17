@@ -219,6 +219,12 @@ export async function POST(req: NextRequest) {
   // only reach the dispatcher through the failing event itself. Last write
   // wins: the most recent failure on that field is the one worth showing.
   const validationMessageByElement = new Map<string, Map<string, string>>()
+  // The browser's own ValidityState flags, off the same events. They are
+  // runtime state (`badInput` comes from the editing pipeline, `customError`
+  // from `setCustomValidity()`), so a parser can never put them in the static
+  // map - the failing event is their only carrier. Last write wins, like the
+  // message above.
+  const runtimeValidityByElement = new Map<string, Map<string, string>>()
   for (const e of allEvents) {
     if (!e.elementId) continue
     const message = e.element?.validationMessage
@@ -229,6 +235,15 @@ export async function POST(req: NextRequest) {
         validationMessageByElement.set(e.sessionId, messages)
       }
       messages.set(e.elementId, message.trim())
+    }
+    const validity = e.element?.validity
+    if (typeof validity === 'string' && validity.trim()) {
+      let flags = runtimeValidityByElement.get(e.sessionId)
+      if (!flags) {
+        flags = new Map()
+        runtimeValidityByElement.set(e.sessionId, flags)
+      }
+      flags.set(e.elementId, validity.trim())
     }
   }
 
@@ -565,6 +580,7 @@ export async function POST(req: NextRequest) {
     elementRoles,
     elementValidation,
     validationMessageByElement,
+    runtimeValidityByElement,
     semanticNameIndex,
     safeMode,
     routeBySession,
